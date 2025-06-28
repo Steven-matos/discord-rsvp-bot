@@ -1,0 +1,20 @@
+# Discord RSVP Bot - Python Dependencies
+
+# Discord API library
+disnake>=2.9.0
+
+# Supabase client for database operations
+supabase>=2.0.0
+
+# Additional dependencies that may be required by supabase
+httpx>=0.24.0
+python-dotenv>=1.0.0
+
+# Optional: For better async performance
+aiofiles>=23.0.0
+
+# Development dependencies (optional - uncomment if needed)
+# pytest>=7.0.0
+# pytest-asyncio>=0.21.0
+# black>=23.0.0
+# flake8>=6.0.0 
