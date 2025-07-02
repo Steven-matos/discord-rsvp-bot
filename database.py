@@ -1,10 +1,10 @@
 import os
 import json
-from supabase import create_client, Client
+from supabase import create_client, Client # type: ignore
 from typing import Dict, Optional
 
 # Load environment variables from .env file
-from dotenv import load_dotenv
+from dotenv import load_dotenv # type: ignore
 load_dotenv()
 
 # Load database configuration from environment variables
