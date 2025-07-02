@@ -3,11 +3,10 @@
 # Discord API library
 disnake>=2.9.0
 
-# Supabase client for database operations
-supabase>=2.0.0
+# Supabase Python client
+supabase>=2.3.0
 
-# Additional dependencies that may be required by supabase
-httpx>=0.24.0
+# Environment variable management
 python-dotenv>=1.0.0
 
 # Optional: For better async performance
