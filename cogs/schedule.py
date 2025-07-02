@@ -76,6 +76,10 @@ class RSVPView(disnake.ui.View):
     async def rsvp_maybe(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
         await self.handle_rsvp(inter, "maybe")
     
+    @disnake.ui.button(label="📱 Mobile", style=disnake.ButtonStyle.primary, custom_id="rsvp_mobile")
+    async def rsvp_mobile(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        await self.handle_rsvp(inter, "mobile")
+    
     async def handle_rsvp(self, inter: disnake.MessageInteraction, response_type: str):
         """Handle RSVP button clicks"""
         user_id = inter.author.id
@@ -85,7 +89,7 @@ class RSVPView(disnake.ui.View):
         success = await database.save_rsvp_response(self.post_id, user_id, guild_id, response_type)
         
         if success:
-            response_emoji = {"yes": "✅", "no": "❌", "maybe": "❓"}[response_type]
+            response_emoji = {"yes": "✅", "no": "❌", "maybe": "❓", "mobile": "📱"}[response_type]
             await inter.response.send_message(
                 f"{response_emoji} **RSVP Updated!**\n"
                 f"Your response has been recorded as: **{response_type.upper()}**",
@@ -481,29 +485,63 @@ class ScheduleCog(commands.Cog):
         # Get RSVP responses
         rsvps = await database.get_rsvp_responses(post_data['id'])
         
-        if not rsvps:
-            await inter.response.send_message(
-                "📋 **No RSVPs Yet**\n"
-                "No one has responded to today's event yet.",
-                ephemeral=True
-            )
-            return
+        # Get all guild members (excluding bots)
+        all_members = [member for member in inter.guild.members if not member.bot]
         
-        # Organize responses
+        # Create sets for easier comparison
+        rsvp_user_ids = {rsvp['user_id'] for rsvp in rsvps}
+        all_user_ids = {member.id for member in all_members}
+        
+        # Find users who haven't RSVPed
+        no_rsvp_user_ids = all_user_ids - rsvp_user_ids
+        
+        # Organize responses with Discord names
         yes_users = []
         no_users = []
         maybe_users = []
+        mobile_users = []
+        no_rsvp_users = []
         
+        # Process RSVP responses
         for rsvp in rsvps:
-            user = inter.guild.get_member(rsvp['user_id'])
-            user_name = user.display_name if user else f"Unknown User ({rsvp['user_id']})"
+            user_id = rsvp['user_id']
+            user = inter.guild.get_member(user_id)
+            
+            if user:
+                user_display = f"{user.display_name} ({user.name})"
+            else:
+                # Try to fetch user from Discord API
+                try:
+                    user = await self.bot.fetch_user(user_id)
+                    user_display = f"{user.display_name} ({user.name})"
+                except:
+                    user_display = f"Unknown User ({user_id})"
             
             if rsvp['response_type'] == 'yes':
-                yes_users.append(user_name)
+                yes_users.append(user_display)
             elif rsvp['response_type'] == 'no':
-                no_users.append(user_name)
+                no_users.append(user_display)
             elif rsvp['response_type'] == 'maybe':
-                maybe_users.append(user_name)
+                maybe_users.append(user_display)
+            elif rsvp['response_type'] == 'mobile':
+                mobile_users.append(user_display)
+        
+        # Process users who haven't RSVPed
+        for user_id in no_rsvp_user_ids:
+            user = inter.guild.get_member(user_id)
+            
+            if user:
+                user_display = f"{user.display_name} ({user.name})"
+                no_rsvp_users.append(user_display)
+            else:
+                # Try to fetch user from Discord API
+                try:
+                    user = await self.bot.fetch_user(user_id)
+                    user_display = f"{user.display_name} ({user.name})"
+                    no_rsvp_users.append(user_display)
+                except:
+                    # Skip users we can't fetch (they might have left the server)
+                    continue
         
         # Create embed
         embed = disnake.Embed(
@@ -515,26 +553,41 @@ class ScheduleCog(commands.Cog):
         if yes_users:
             embed.add_field(
                 name=f"✅ Attending ({len(yes_users)})",
-                value="\n".join(yes_users) if len(yes_users) <= 10 else f"{len(yes_users)} users (too many to list)",
+                value="\n".join(yes_users) if len(yes_users) <= 15 else f"{len(yes_users)} users (too many to list)",
                 inline=False
             )
         
         if maybe_users:
             embed.add_field(
                 name=f"❓ Maybe ({len(maybe_users)})",
-                value="\n".join(maybe_users) if len(maybe_users) <= 10 else f"{len(maybe_users)} users (too many to list)",
+                value="\n".join(maybe_users) if len(maybe_users) <= 15 else f"{len(maybe_users)} users (too many to list)",
+                inline=False
+            )
+        
+        if mobile_users:
+            embed.add_field(
+                name=f"📱 Mobile ({len(mobile_users)})",
+                value="\n".join(mobile_users) if len(mobile_users) <= 15 else f"{len(mobile_users)} users (too many to list)",
                 inline=False
             )
         
         if no_users:
             embed.add_field(
                 name=f"❌ Not Attending ({len(no_users)})",
-                value="\n".join(no_users) if len(no_users) <= 10 else f"{len(no_users)} users (too many to list)",
+                value="\n".join(no_users) if len(no_users) <= 15 else f"{len(no_users)} users (too many to list)",
                 inline=False
             )
         
-        total_responses = len(yes_users) + len(maybe_users) + len(no_users)
-        embed.set_footer(text=f"Total responses: {total_responses}")
+        if no_rsvp_users:
+            embed.add_field(
+                name=f"⏰ No Response ({len(no_rsvp_users)})",
+                value="\n".join(no_rsvp_users) if len(no_rsvp_users) <= 15 else f"{len(no_rsvp_users)} users (too many to list)",
+                inline=False
+            )
+        
+        total_responses = len(yes_users) + len(maybe_users) + len(mobile_users) + len(no_users)
+        total_members = len(all_members)
+        embed.set_footer(text=f"Total responses: {total_responses}/{total_members} members")
         
         await inter.response.send_message(embed=embed, ephemeral=True)
     

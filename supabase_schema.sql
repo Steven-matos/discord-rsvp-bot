@@ -73,7 +73,7 @@ CREATE TABLE rsvp_responses (
     post_id UUID NOT NULL,
     user_id BIGINT NOT NULL,
     guild_id BIGINT NOT NULL,
-    response_type VARCHAR(20) NOT NULL CHECK (response_type IN ('yes', 'no', 'maybe')),
+    response_type VARCHAR(20) NOT NULL CHECK (response_type IN ('yes', 'no', 'maybe', 'mobile')),
     responded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     
     -- One response per user per post
