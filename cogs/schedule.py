@@ -38,6 +38,23 @@ class ScheduleDayModal(disnake.ui.Modal):
             ]
         )
 
+class NextDayButton(disnake.ui.View):
+    def __init__(self, next_day: str, guild_id: int):
+        super().__init__(timeout=300)  # 5 minute timeout
+        self.next_day = next_day
+        self.guild_id = guild_id
+    
+    @disnake.ui.button(label="Continue to Next Day", style=disnake.ButtonStyle.primary, emoji="➡️")
+    async def next_day_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        # Present modal for next day
+        modal = ScheduleDayModal(self.next_day, self.guild_id)
+        await inter.response.send_modal(modal)
+    
+    async def on_timeout(self):
+        # Disable the button when timeout occurs
+        for item in self.children:
+            item.disabled = True
+
 class ScheduleCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -140,26 +157,36 @@ class ScheduleCog(commands.Cog):
                 self.current_setups[guild_id] = next_day_index
                 next_day = self.days[next_day_index]
                 
-                # Acknowledge current day completion and present next modal
+                # Acknowledge current day completion and provide button to continue
+                view = NextDayButton(next_day, guild_id)
                 await inter.response.send_message(
                     f"✅ **{day.capitalize()} Schedule Saved!**\n\n"
                     f"**Event:** {event_name}\n"
                     f"**Outfit:** {outfit}\n"
                     f"**Vehicle:** {vehicle}\n\n"
-                    f"Now setting up **{next_day.capitalize()}**...",
-                    ephemeral=True
+                    f"Ready to set up **{next_day.capitalize()}**. Click the button below to continue.",
+                    ephemeral=True,
+                    view=view
                 )
-                
-                # Present modal for next day
-                next_modal = ScheduleDayModal(next_day, guild_id)
-                await inter.followup.send_modal(next_modal)
         
         except Exception as e:
             print(f"Error handling modal submission: {e}")
-            await inter.response.send_message(
-                "❌ An error occurred while processing your submission. Please try again.",
-                ephemeral=True
-            )
+            
+            # Try to send error message if interaction hasn't been responded to yet
+            try:
+                if not inter.response.is_done():
+                    await inter.response.send_message(
+                        "❌ An error occurred while processing your submission. Please try again.",
+                        ephemeral=True
+                    )
+                else:
+                    # If interaction already responded, send as followup
+                    await inter.followup.send(
+                        "❌ An error occurred while processing your submission. Please try again.",
+                        ephemeral=True
+                    )
+            except Exception as response_error:
+                print(f"Failed to send error message: {response_error}")
             
             # Clean up failed setup
             guild_id = inter.guild.id
