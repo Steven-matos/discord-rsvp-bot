@@ -1,7 +1,8 @@
 import os
 import json
 from supabase import create_client, Client # type: ignore
-from typing import Dict, Optional
+from typing import Dict, Optional, List
+from datetime import date
 
 # Load environment variables from .env file
 from dotenv import load_dotenv # type: ignore
@@ -108,3 +109,217 @@ async def get_guild_schedule(guild_id: int) -> dict:
     except Exception as e:
         print(f"Error getting guild schedule for guild {guild_id}: {e}")
         return {}
+
+async def get_all_guilds_with_schedules() -> List[int]:
+    """
+    Get all guild IDs that have weekly schedules configured.
+    
+    Returns:
+        List of guild IDs
+    """
+    try:
+        client = get_supabase_client()
+        
+        result = client.table('weekly_schedules').select('guild_id').execute()
+        
+        if not result.data:
+            return []
+        
+        return [row['guild_id'] for row in result.data]
+        
+    except Exception as e:
+        print(f"Error getting guilds with schedules: {e}")
+        return []
+
+async def save_guild_settings(guild_id: int, settings: dict) -> bool:
+    """
+    Save guild settings.
+    
+    Args:
+        guild_id: Discord guild ID
+        settings: Dictionary containing guild settings
+    
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        client = get_supabase_client()
+        print(f"Attempting to save guild settings for guild {guild_id}: {settings}")
+        
+        # Check if guild settings already exist
+        existing_result = client.table('guild_settings').select('guild_id').eq('guild_id', guild_id).execute()
+        print(f"Existing settings check result: {existing_result.data}")
+        
+        if existing_result.data:
+            # Update existing settings
+            settings['updated_at'] = 'now()'
+            result = client.table('guild_settings').update(settings).eq('guild_id', guild_id).execute()
+            print(f"Updated existing settings: {result.data}")
+        else:
+            # Create new settings
+            settings['guild_id'] = guild_id
+            result = client.table('guild_settings').insert(settings).execute()
+            print(f"Created new settings: {result.data}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error saving guild settings for guild {guild_id}: {e}")
+        return False
+
+async def get_guild_settings(guild_id: int) -> dict:
+    """
+    Get guild settings.
+    
+    Args:
+        guild_id: Discord guild ID
+    
+    Returns:
+        Dictionary containing guild settings, empty dict if not found
+    """
+    try:
+        client = get_supabase_client()
+        
+        result = client.table('guild_settings').select('*').eq('guild_id', guild_id).execute()
+        
+        if not result.data:
+            return {}
+        
+        return result.data[0]
+        
+    except Exception as e:
+        print(f"Error getting guild settings for guild {guild_id}: {e}")
+        return {}
+
+async def save_daily_post(guild_id: int, channel_id: int, message_id: int, event_date: date, day_of_week: str, event_data: dict) -> Optional[str]:
+    """
+    Save a daily event post to the database.
+    
+    Args:
+        guild_id: Discord guild ID
+        channel_id: Discord channel ID
+        message_id: Discord message ID
+        event_date: Date of the event
+        day_of_week: Day of the week (e.g., "monday")
+        event_data: Event data dictionary
+    
+    Returns:
+        Post ID on success, None on failure
+    """
+    try:
+        client = get_supabase_client()
+        
+        insert_data = {
+            'guild_id': guild_id,
+            'channel_id': channel_id,
+            'message_id': message_id,
+            'event_date': event_date.isoformat(),
+            'day_of_week': day_of_week,
+            'event_data': json.dumps(event_data)
+        }
+        
+        result = client.table('daily_posts').insert(insert_data).execute()
+        
+        if result.data:
+            return result.data[0]['id']
+        
+        return None
+        
+    except Exception as e:
+        print(f"Error saving daily post for guild {guild_id}: {e}")
+        return None
+
+async def get_daily_post(guild_id: int, event_date: date) -> Optional[dict]:
+    """
+    Get a daily post for a specific date.
+    
+    Args:
+        guild_id: Discord guild ID
+        event_date: Date of the event
+    
+    Returns:
+        Post data dictionary or None if not found
+    """
+    try:
+        client = get_supabase_client()
+        
+        result = client.table('daily_posts').select('*').eq('guild_id', guild_id).eq('event_date', event_date.isoformat()).execute()
+        
+        if not result.data:
+            return None
+        
+        post_data = result.data[0]
+        # Parse the event_data JSON
+        post_data['event_data'] = json.loads(post_data['event_data'])
+        
+        return post_data
+        
+    except Exception as e:
+        print(f"Error getting daily post for guild {guild_id}, date {event_date}: {e}")
+        return None
+
+async def save_rsvp_response(post_id: str, user_id: int, guild_id: int, response_type: str) -> bool:
+    """
+    Save an RSVP response to the database.
+    
+    Args:
+        post_id: UUID of the daily post
+        user_id: Discord user ID
+        guild_id: Discord guild ID
+        response_type: "yes", "no", or "maybe"
+    
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        client = get_supabase_client()
+        
+        # Check if user already has an RSVP for this post
+        existing_result = client.table('rsvp_responses').select('id').eq('post_id', post_id).eq('user_id', user_id).execute()
+        
+        if existing_result.data:
+            # Update existing RSVP
+            update_data = {
+                'response_type': response_type,
+                'responded_at': 'now()'
+            }
+            result = client.table('rsvp_responses').update(update_data).eq('post_id', post_id).eq('user_id', user_id).execute()
+        else:
+            # Create new RSVP
+            insert_data = {
+                'post_id': post_id,
+                'user_id': user_id,
+                'guild_id': guild_id,
+                'response_type': response_type
+            }
+            result = client.table('rsvp_responses').insert(insert_data).execute()
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error saving RSVP response for post {post_id}, user {user_id}: {e}")
+        return False
+
+async def get_rsvp_responses(post_id: str) -> List[dict]:
+    """
+    Get all RSVP responses for a daily post.
+    
+    Args:
+        post_id: UUID of the daily post
+    
+    Returns:
+        List of RSVP response dictionaries
+    """
+    try:
+        client = get_supabase_client()
+        
+        result = client.table('rsvp_responses').select('*').eq('post_id', post_id).execute()
+        
+        if not result.data:
+            return []
+        
+        return result.data
+        
+    except Exception as e:
+        print(f"Error getting RSVP responses for post {post_id}: {e}")
+        return []
