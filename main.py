@@ -13,6 +13,7 @@ intents.guilds = True
 intents.messages = True
 intents.reactions = True
 intents.message_content = True
+intents.members = True  # Required to access guild member list (PRIVILEGED INTENT - must be enabled in Discord Developer Portal)
 
 # Initialize bot
 bot = commands.Bot(command_prefix='!', intents=intents)
