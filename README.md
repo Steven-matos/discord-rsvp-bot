@@ -73,6 +73,10 @@ A friendly Discord bot that helps your community organize weekly events with eas
 
 ## 🎮 Setting Up Your Events
 
+### Invite to Server
+
+URL: https://discord.com/oauth2/authorize?client_id=1388283299562262559&permissions=2147707968&integration_type=0&scope=bot
+
 ### First Time Setup (5 minutes)
 
 1. **Create your weekly schedule**
