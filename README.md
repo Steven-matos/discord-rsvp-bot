@@ -59,6 +59,7 @@ A comprehensive Discord bot that helps manage weekly event schedules with RSVP t
    - Run the contents of `supabase_schema.sql` to create the required tables
    - Run `migration_add_mobile_rsvp.sql` to add mobile RSVP support
    - Run `migration_add_reminder_system.sql` to add reminder system support
+   - Run `migration_add_4pm_reminder.sql` to add 4:00 PM reminder support
    - Copy your project URL and anon key to the `.env` file
 
 5. **Run the bot**
@@ -95,7 +96,7 @@ A comprehensive Discord bot that helps manage weekly event schedules with RSVP t
 
 5. **Configure reminders**:
    ```
-   /configure_reminders enabled:true one_hour:true fifteen_minutes:true five_minutes:false
+   /configure_reminders enabled:true four_pm:true one_hour:true fifteen_minutes:true
    ```
 
 ### Weekly Schedule Setup
@@ -124,11 +125,11 @@ Users can change their RSVP at any time by clicking a different button.
 
 ### Automatic Features
 
-- **Daily Posting**: Events automatically post at 9:00 AM UTC
+- **Daily Posting**: Events automatically post at 9:00 AM Eastern Time
 - **Reminders**: Automatic reminders sent based on your settings:
+  - 4:00 PM Eastern (default: enabled)
   - 1 hour before event (default: enabled)
   - 15 minutes before event (default: enabled)
-  - 5 minutes before event (default: disabled)
 
 ## 🛠️ Commands
 
@@ -141,8 +142,10 @@ Users can change their RSVP at any time by clicking a different button.
 | `/test_daily_event` | Test daily event posting | Manage Server |
 | `/test_reminder` | Test reminder system (10/20 second test) | Manage Server |
 | `/view_rsvps` | View RSVP responses for today's event | Manage Server |
+| `/view_yesterday_rsvps` | View RSVP responses for yesterday's event | Manage Server |
 | `/list_commands` | List all available commands | Manage Server |
 | `/force_sync` | Force sync commands to Discord | Manage Server |
+| `/test_command` | Test if slash commands are working | Manage Server |
 
 ## 🧪 Testing Guide
 
@@ -153,7 +156,7 @@ Users can change their RSVP at any time by clicking a different button.
    /setup_weekly_schedule
    /set_event_channel #your-events-channel
    /set_event_time hour:20 minute:0
-   /configure_reminders enabled:true one_hour:true fifteen_minutes:true
+   /configure_reminders enabled:true four_pm:true one_hour:true fifteen_minutes:true
    ```
 
 2. **Test Daily Event Posting**

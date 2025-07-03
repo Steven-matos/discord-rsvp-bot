@@ -125,10 +125,10 @@ class ScheduleCog(commands.Cog):
     @tasks.loop(minutes=1)  # Check every minute
     async def daily_posting_task(self):
         """Check if it's time to post daily events"""
-        now = datetime.now(timezone.utc)
+        now_eastern = datetime.now(self.eastern_tz)
         
-        # Post at 9 AM UTC daily
-        if now.hour == 9 and now.minute == 0:
+        # Post at 9 AM Eastern Time daily
+        if now_eastern.hour == 9 and now_eastern.minute == 0:
             await self.post_daily_events()
     
     @daily_posting_task.before_loop
@@ -138,10 +138,10 @@ class ScheduleCog(commands.Cog):
     @tasks.loop(minutes=1)  # Check every minute
     async def reminder_check_task(self):
         """Check if it's time to send reminders for events"""
-        now = datetime.now(timezone.utc)
+        now_eastern = datetime.now(self.eastern_tz)
         
         # Only check at specific minutes to avoid spam
-        if now.minute % 5 == 0:  # Check every 5 minutes
+        if now_eastern.minute % 5 == 0:  # Check every 5 minutes
             await self.check_and_send_reminders()
     
     @reminder_check_task.before_loop
@@ -302,7 +302,7 @@ class ScheduleCog(commands.Cog):
             event_time = datetime.strptime(event_time_str, '%H:%M:%S').time()
             
             # Create event datetime in Eastern time
-            today = datetime.now(timezone.utc).date()
+            today = datetime.now(self.eastern_tz).date()
             eastern_now = datetime.now(self.eastern_tz)
             event_datetime_eastern = eastern_now.replace(
                 year=today.year, 
@@ -316,29 +316,25 @@ class ScheduleCog(commands.Cog):
             
             # Convert to UTC for comparison
             event_datetime_utc = event_datetime_eastern.astimezone(timezone.utc)
-            now_utc = datetime.now(timezone.utc)
             
-            # Calculate time differences
-            time_until_event = event_datetime_utc - now_utc
-            minutes_until_event = time_until_event.total_seconds() / 60
+            # Check for 4:00 PM Eastern reminder
+            if (settings.get('reminder_enabled', True) and 
+                settings.get('reminder_4pm', True) and
+                eastern_now.hour == 16 and eastern_now.minute == 0 and  # 4:00 PM Eastern
+                not await database.check_reminder_sent(post_data['id'], '4pm')):
+                await self.send_reminder(guild_id, post_data, '4pm', event_datetime_utc)
             
-            # Check for 1 hour reminder (60 minutes)
-            if (settings.get('reminder_1_hour', True) and 
-                55 <= minutes_until_event <= 65 and  # 5-minute window
-                not await database.check_reminder_sent(post_data['id'], '1_hour')):
+            # Check for 1 hour before event reminder
+            elif (settings.get('reminder_1_hour', True) and 
+                  eastern_now.hour == event_time.hour - 1 and eastern_now.minute == 0 and  # 1 hour before
+                  not await database.check_reminder_sent(post_data['id'], '1_hour')):
                 await self.send_reminder(guild_id, post_data, '1_hour', event_datetime_utc)
             
-            # Check for 15 minutes reminder
+            # Check for 15 minutes before event reminder
             elif (settings.get('reminder_15_minutes', True) and 
-                  10 <= minutes_until_event <= 20 and  # 5-minute window
+                  eastern_now.hour == event_time.hour and eastern_now.minute == event_time.minute - 15 and  # 15 minutes before
                   not await database.check_reminder_sent(post_data['id'], '15_minutes')):
                 await self.send_reminder(guild_id, post_data, '15_minutes', event_datetime_utc)
-            
-            # Check for 5 minutes reminder
-            elif (settings.get('reminder_5_minutes', False) and 
-                  0 <= minutes_until_event <= 10 and  # 5-minute window
-                  not await database.check_reminder_sent(post_data['id'], '5_minutes')):
-                await self.send_reminder(guild_id, post_data, '5_minutes', event_datetime_utc)
                 
         except Exception as e:
             print(f"Error checking reminders for guild {guild_id}: {e}")
@@ -388,7 +384,12 @@ class ScheduleCog(commands.Cog):
         eastern_time = event_datetime_utc.astimezone(self.eastern_tz).strftime("%I:%M %p ET")
         
         # Set embed properties based on reminder type
-        if reminder_type == '1_hour':
+        if reminder_type == '4pm':
+            title = "📢 Afternoon Event Reminder"
+            color = disnake.Color.blue()
+            time_text = f"**Event starts at:** {eastern_time} / {utc_time}"
+            footer = "Don't forget to RSVP if you haven't already!"
+        elif reminder_type == '1_hour':
             title = "🔔 Event Reminder - 1 Hour"
             color = disnake.Color.orange()
             time_text = f"**Event starts at:** {eastern_time} / {utc_time}"
@@ -398,11 +399,6 @@ class ScheduleCog(commands.Cog):
             color = disnake.Color.red()
             time_text = f"**Event starts at:** {eastern_time} / {utc_time}"
             footer = "Last chance to join!"
-        elif reminder_type == '5_minutes':
-            title = "⚡ Event Starting Soon - 5 Minutes"
-            color = disnake.Color.dark_red()
-            time_text = f"**Event starts at:** {eastern_time} / {utc_time}"
-            footer = "Get ready!"
         else:
             title = "📢 Event Reminder"
             color = disnake.Color.blue()
@@ -442,12 +438,14 @@ class ScheduleCog(commands.Cog):
         commands_list = [
             "• `/setup_weekly_schedule` - Set up weekly events",
             "• `/set_event_channel` - Set event posting channel", 
+            "• `/set_event_time` - Set event time (Eastern)",
+            "• `/configure_reminders` - Configure reminder settings",
             "• `/test_daily_event` - Test daily event posting",
             "• `/test_reminder` - Test reminder system",
-        "• `/set_event_time` - Set event time (Eastern)",
-        "• `/configure_reminders` - Configure reminder settings",
-            "• `/view_rsvps` - View RSVP responses",
+            "• `/view_rsvps` - View RSVP responses for today",
+            "• `/view_yesterday_rsvps` - View RSVP responses for yesterday",
             "• `/list_commands` - List all commands (this command)",
+            "• `/force_sync` - Force sync commands to Discord",
             "• `/test_command` - Test if commands work"
         ]
         
@@ -759,9 +757,9 @@ class ScheduleCog(commands.Cog):
         self, 
         inter: disnake.ApplicationCommandInteraction,
         enabled: bool = commands.Param(description="Enable/disable all reminders", default=True),
-        one_hour: bool = commands.Param(description="Send reminder 1 hour before", default=True),
-        fifteen_minutes: bool = commands.Param(description="Send reminder 15 minutes before", default=True),
-        five_minutes: bool = commands.Param(description="Send reminder 5 minutes before", default=False)
+        four_pm: bool = commands.Param(description="Send reminder at 4:00 PM Eastern", default=True),
+        one_hour: bool = commands.Param(description="Send reminder 1 hour before event", default=True),
+        fifteen_minutes: bool = commands.Param(description="Send reminder 15 minutes before event", default=True)
     ):
         """Configure reminder settings"""
         try:
@@ -770,9 +768,9 @@ class ScheduleCog(commands.Cog):
             # Prepare settings
             settings = {
                 "reminder_enabled": enabled,
+                "reminder_4pm": four_pm,
                 "reminder_1_hour": one_hour,
-                "reminder_15_minutes": fifteen_minutes,
-                "reminder_5_minutes": five_minutes
+                "reminder_15_minutes": fifteen_minutes
             }
             
             # Save to database
@@ -781,9 +779,9 @@ class ScheduleCog(commands.Cog):
             if success:
                 # Create status message
                 status = "✅ Enabled" if enabled else "❌ Disabled"
+                four_pm_status = "✅" if four_pm else "❌"
                 one_hour_status = "✅" if one_hour else "❌"
                 fifteen_min_status = "✅" if fifteen_minutes else "❌"
-                five_min_status = "✅" if five_minutes else "❌"
                 
                 embed = disnake.Embed(
                     title="🔔 Reminder Settings Updated",
@@ -793,9 +791,9 @@ class ScheduleCog(commands.Cog):
                 
                 embed.add_field(
                     name="Reminder Timing",
-                    value=f"{one_hour_status} 1 hour before\n"
-                          f"{fifteen_min_status} 15 minutes before\n"
-                          f"{five_min_status} 5 minutes before",
+                    value=f"{four_pm_status} 4:00 PM Eastern\n"
+                          f"{one_hour_status} 1 hour before event\n"
+                          f"{fifteen_min_status} 15 minutes before event",
                     inline=False
                 )
                 
