@@ -12,7 +12,7 @@ intents = disnake.Intents.default()
 intents.guilds = True
 intents.messages = True
 intents.reactions = True
-intents.message_content = False
+intents.message_content = True
 
 # Initialize bot
 bot = commands.Bot(command_prefix='!', intents=intents)

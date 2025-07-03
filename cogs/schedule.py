@@ -4,6 +4,7 @@ import database
 import asyncio
 from datetime import datetime, timedelta, timezone
 import calendar
+import pytz
 
 class ScheduleDayModal(disnake.ui.Modal):
     def __init__(self, day: str, guild_id: int):
@@ -109,11 +110,17 @@ class ScheduleCog(commands.Cog):
         # Days of the week in order
         self.days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
         
+        # Eastern timezone for event times
+        self.eastern_tz = pytz.timezone('America/New_York')
+        
         # Start the daily posting task
         self.daily_posting_task.start()
+        # Start the reminder checking task
+        self.reminder_check_task.start()
     
     def cog_unload(self):
         self.daily_posting_task.cancel()
+        self.reminder_check_task.cancel()
     
     @tasks.loop(minutes=1)  # Check every minute
     async def daily_posting_task(self):
@@ -126,6 +133,19 @@ class ScheduleCog(commands.Cog):
     
     @daily_posting_task.before_loop
     async def before_daily_posting(self):
+        await self.bot.wait_until_ready()
+    
+    @tasks.loop(minutes=1)  # Check every minute
+    async def reminder_check_task(self):
+        """Check if it's time to send reminders for events"""
+        now = datetime.now(timezone.utc)
+        
+        # Only check at specific minutes to avoid spam
+        if now.minute % 5 == 0:  # Check every 5 minutes
+            await self.check_and_send_reminders()
+    
+    @reminder_check_task.before_loop
+    async def before_reminder_check(self):
         await self.bot.wait_until_ready()
     
     async def post_daily_events(self):
@@ -169,6 +189,30 @@ class ScheduleCog(commands.Cog):
         
         event_data = schedule[day_name]
         
+        # Get guild settings for event time
+        guild_settings = await database.get_guild_settings(guild_id)
+        event_time_str = guild_settings.get('event_time', '20:00:00') if guild_settings else '20:00:00'
+        event_time = datetime.strptime(event_time_str, '%H:%M:%S').time()
+        
+        # Create event datetime in Eastern time
+        eastern_now = datetime.now(self.eastern_tz)
+        event_datetime_eastern = eastern_now.replace(
+            year=today.year, 
+            month=today.month, 
+            day=today.day,
+            hour=event_time.hour,
+            minute=event_time.minute,
+            second=0,
+            microsecond=0
+        )
+        
+        # Convert to UTC for display
+        event_datetime_utc = event_datetime_eastern.astimezone(timezone.utc)
+        
+        # Format times for display
+        eastern_time_display = event_datetime_eastern.strftime("%I:%M %p ET")
+        utc_time_display = event_datetime_utc.strftime("%I:%M %p UTC")
+        
         # Create embed for the event
         embed = disnake.Embed(
             title=f"🎯 Today's Event - {day_name.capitalize()}",
@@ -187,6 +231,12 @@ class ScheduleCog(commands.Cog):
             name="🚗 Vehicle",
             value=event_data['vehicle'],
             inline=True
+        )
+        
+        embed.add_field(
+            name="⏰ Time",
+            value=f"**{eastern_time_display}** / **{utc_time_display}**",
+            inline=False
         )
         
         embed.add_field(
@@ -217,6 +267,163 @@ class ScheduleCog(commands.Cog):
         if post_id:
             view.post_id = post_id
     
+    async def check_and_send_reminders(self):
+        """Check all guilds and send reminders if needed"""
+        try:
+            # Get all guilds with reminder settings
+            guilds_data = await database.get_guilds_needing_reminders()
+            
+            for guild_data in guilds_data:
+                guild_id = guild_data['guild_id']
+                settings = guild_data['guild_settings']
+                
+                # Skip if reminders are disabled
+                if not settings.get('reminder_enabled', True):
+                    continue
+                
+                # Get today's event
+                today = datetime.now(timezone.utc).date()
+                post_data = await database.get_daily_post(guild_id, today)
+                
+                if not post_data:
+                    continue  # No event today
+                
+                # Check if we need to send reminders
+                await self.check_guild_reminders(guild_id, post_data, settings)
+                
+        except Exception as e:
+            print(f"Error in check_and_send_reminders: {e}")
+    
+    async def check_guild_reminders(self, guild_id: int, post_data: dict, settings: dict):
+        """Check and send reminders for a specific guild"""
+        try:
+            # Get event time from settings (stored in Eastern time)
+            event_time_str = settings.get('event_time', '20:00:00')
+            event_time = datetime.strptime(event_time_str, '%H:%M:%S').time()
+            
+            # Create event datetime in Eastern time
+            today = datetime.now(timezone.utc).date()
+            eastern_now = datetime.now(self.eastern_tz)
+            event_datetime_eastern = eastern_now.replace(
+                year=today.year, 
+                month=today.month, 
+                day=today.day,
+                hour=event_time.hour,
+                minute=event_time.minute,
+                second=0,
+                microsecond=0
+            )
+            
+            # Convert to UTC for comparison
+            event_datetime_utc = event_datetime_eastern.astimezone(timezone.utc)
+            now_utc = datetime.now(timezone.utc)
+            
+            # Calculate time differences
+            time_until_event = event_datetime_utc - now_utc
+            minutes_until_event = time_until_event.total_seconds() / 60
+            
+            # Check for 1 hour reminder (60 minutes)
+            if (settings.get('reminder_1_hour', True) and 
+                55 <= minutes_until_event <= 65 and  # 5-minute window
+                not await database.check_reminder_sent(post_data['id'], '1_hour')):
+                await self.send_reminder(guild_id, post_data, '1_hour', event_datetime_utc)
+            
+            # Check for 15 minutes reminder
+            elif (settings.get('reminder_15_minutes', True) and 
+                  10 <= minutes_until_event <= 20 and  # 5-minute window
+                  not await database.check_reminder_sent(post_data['id'], '15_minutes')):
+                await self.send_reminder(guild_id, post_data, '15_minutes', event_datetime_utc)
+            
+            # Check for 5 minutes reminder
+            elif (settings.get('reminder_5_minutes', False) and 
+                  0 <= minutes_until_event <= 10 and  # 5-minute window
+                  not await database.check_reminder_sent(post_data['id'], '5_minutes')):
+                await self.send_reminder(guild_id, post_data, '5_minutes', event_datetime_utc)
+                
+        except Exception as e:
+            print(f"Error checking reminders for guild {guild_id}: {e}")
+    
+    async def send_reminder(self, guild_id: int, post_data: dict, reminder_type: str, event_datetime_utc: datetime):
+        """Send a reminder for an event"""
+        try:
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                return
+            
+            # Get guild settings
+            guild_settings = await database.get_guild_settings(guild_id)
+            if not guild_settings or not guild_settings.get('event_channel_id'):
+                return
+            
+            channel = guild.get_channel(guild_settings['event_channel_id'])
+            if not channel:
+                return
+            
+            # Create reminder embed
+            embed = self.create_reminder_embed(post_data, reminder_type, event_datetime_utc)
+            
+            # Send reminder
+            await channel.send("@everyone", embed=embed)
+            
+            # Mark reminder as sent
+            await database.save_reminder_sent(
+                post_data['id'], 
+                guild_id, 
+                reminder_type, 
+                post_data['event_date']
+            )
+            
+            print(f"Sent {reminder_type} reminder for guild {guild_id}")
+            
+        except Exception as e:
+            print(f"Error sending reminder for guild {guild_id}: {e}")
+    
+    def create_reminder_embed(self, post_data: dict, reminder_type: str, event_datetime_utc: datetime) -> disnake.Embed:
+        """Create a reminder embed with timezone conversion"""
+        event_data = post_data['event_data']
+        
+        # Convert UTC time to user-friendly display
+        # Note: We can't know each user's timezone, so we'll show multiple timezones
+        utc_time = event_datetime_utc.strftime("%I:%M %p UTC")
+        eastern_time = event_datetime_utc.astimezone(self.eastern_tz).strftime("%I:%M %p ET")
+        
+        # Set embed properties based on reminder type
+        if reminder_type == '1_hour':
+            title = "🔔 Event Reminder - 1 Hour"
+            color = disnake.Color.orange()
+            time_text = f"**Event starts at:** {eastern_time} / {utc_time}"
+            footer = "Don't forget to RSVP if you haven't already!"
+        elif reminder_type == '15_minutes':
+            title = "🚨 Final Reminder - 15 Minutes"
+            color = disnake.Color.red()
+            time_text = f"**Event starts at:** {eastern_time} / {utc_time}"
+            footer = "Last chance to join!"
+        elif reminder_type == '5_minutes':
+            title = "⚡ Event Starting Soon - 5 Minutes"
+            color = disnake.Color.dark_red()
+            time_text = f"**Event starts at:** {eastern_time} / {utc_time}"
+            footer = "Get ready!"
+        else:
+            title = "📢 Event Reminder"
+            color = disnake.Color.blue()
+            time_text = f"**Event starts at:** {eastern_time} / {utc_time}"
+            footer = "Event reminder"
+        
+        embed = disnake.Embed(
+            title=title,
+            description=f"**{event_data['event_name']}**",
+            color=color,
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        embed.add_field(name="👔 Outfit/Gear", value=event_data['outfit'], inline=True)
+        embed.add_field(name="🚗 Vehicle", value=event_data['vehicle'], inline=True)
+        embed.add_field(name="⏰ Time", value=time_text, inline=False)
+        
+        embed.set_footer(text=footer)
+        
+        return embed
+    
     @commands.slash_command(
         name="test_command",
         description="Test if slash commands are working"
@@ -237,6 +444,8 @@ class ScheduleCog(commands.Cog):
             "• `/set_event_channel` - Set event posting channel", 
             "• `/test_daily_event` - Test daily event posting",
             "• `/test_reminder` - Test reminder system",
+        "• `/set_event_time` - Set event time (Eastern)",
+        "• `/configure_reminders` - Configure reminder settings",
             "• `/view_rsvps` - View RSVP responses",
             "• `/list_commands` - List all commands (this command)",
             "• `/test_command` - Test if commands work"
@@ -436,6 +645,31 @@ class ScheduleCog(commands.Cog):
         
         event_data = schedule[day_name]
         
+        # Get guild settings for event time
+        guild_settings = await database.get_guild_settings(guild_id)
+        event_time_str = guild_settings.get('event_time', '20:00:00') if guild_settings else '20:00:00'
+        event_time = datetime.strptime(event_time_str, '%H:%M:%S').time()
+        
+        # Create event datetime in Eastern time
+        eastern_now = datetime.now(self.eastern_tz)
+        event_datetime_eastern = eastern_now.replace(
+            year=today.year, 
+            month=today.month, 
+            day=today.day,
+            hour=event_time.hour,
+            minute=event_time.minute,
+            second=0,
+            microsecond=0
+        )
+        
+        # Convert to UTC for display
+        event_datetime_utc = event_datetime_eastern.astimezone(timezone.utc)
+        
+        # Format times for display
+        eastern_time_display = event_datetime_eastern.strftime("%I:%M %p ET")
+        utc_time_display = event_datetime_utc.strftime("%I:%M %p UTC")
+        time_text = f"**{eastern_time_display}** / **{utc_time_display}**"
+        
         # First reminder (10 seconds)
         await asyncio.sleep(10)
         embed1 = disnake.Embed(
@@ -445,6 +679,7 @@ class ScheduleCog(commands.Cog):
         )
         embed1.add_field(name="👔 Outfit", value=event_data['outfit'], inline=True)
         embed1.add_field(name="🚗 Vehicle", value=event_data['vehicle'], inline=True)
+        embed1.add_field(name="⏰ Time", value=time_text, inline=False)
         embed1.set_footer(text="Don't forget to RSVP if you haven't already!")
         
         await channel.send("@everyone", embed=embed1)
@@ -458,9 +693,127 @@ class ScheduleCog(commands.Cog):
         )
         embed2.add_field(name="👔 Outfit", value=event_data['outfit'], inline=True)
         embed2.add_field(name="🚗 Vehicle", value=event_data['vehicle'], inline=True)
+        embed2.add_field(name="⏰ Time", value=time_text, inline=False)
         embed2.set_footer(text="Last chance to join!")
         
         await channel.send("@everyone", embed=embed2)
+    
+    @commands.slash_command(
+        name="set_event_time",
+        description="Set the time when events start (Eastern Time)"
+    )
+    @commands.default_member_permissions(manage_guild=True)
+    async def set_event_time(
+        self, 
+        inter: disnake.ApplicationCommandInteraction,
+        hour: int = commands.Param(description="Hour (0-23)", ge=0, le=23),
+        minute: int = commands.Param(description="Minute (0-59)", ge=0, le=59)
+    ):
+        """Set the event time in Eastern Time"""
+        try:
+            guild_id = inter.guild.id
+            
+            # Validate time
+            if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+                await inter.response.send_message(
+                    "❌ **Invalid Time!**\n"
+                    "Hour must be 0-23 and minute must be 0-59.",
+                    ephemeral=True
+                )
+                return
+            
+            # Format time as HH:MM:SS
+            time_str = f"{hour:02d}:{minute:02d}:00"
+            
+            # Save to database
+            success = await database.save_guild_settings(guild_id, {"event_time": time_str})
+            
+            if success:
+                # Convert to 12-hour format for display
+                eastern_time = datetime.strptime(time_str, '%H:%M:%S').strftime('%I:%M %p')
+                await inter.response.send_message(
+                    f"✅ **Event Time Set!**\n"
+                    f"Events will start at **{eastern_time} Eastern Time**\n"
+                    f"Reminders will be sent automatically based on your settings.",
+                    ephemeral=True
+                )
+            else:
+                await inter.response.send_message(
+                    "❌ Failed to save event time. Please try again.",
+                    ephemeral=True
+                )
+                
+        except Exception as e:
+            await inter.response.send_message(
+                f"❌ **Error Setting Event Time**\n"
+                f"An error occurred: {str(e)}",
+                ephemeral=True
+            )
+    
+    @commands.slash_command(
+        name="configure_reminders",
+        description="Configure reminder settings for events"
+    )
+    @commands.default_member_permissions(manage_guild=True)
+    async def configure_reminders(
+        self, 
+        inter: disnake.ApplicationCommandInteraction,
+        enabled: bool = commands.Param(description="Enable/disable all reminders", default=True),
+        one_hour: bool = commands.Param(description="Send reminder 1 hour before", default=True),
+        fifteen_minutes: bool = commands.Param(description="Send reminder 15 minutes before", default=True),
+        five_minutes: bool = commands.Param(description="Send reminder 5 minutes before", default=False)
+    ):
+        """Configure reminder settings"""
+        try:
+            guild_id = inter.guild.id
+            
+            # Prepare settings
+            settings = {
+                "reminder_enabled": enabled,
+                "reminder_1_hour": one_hour,
+                "reminder_15_minutes": fifteen_minutes,
+                "reminder_5_minutes": five_minutes
+            }
+            
+            # Save to database
+            success = await database.save_guild_settings(guild_id, settings)
+            
+            if success:
+                # Create status message
+                status = "✅ Enabled" if enabled else "❌ Disabled"
+                one_hour_status = "✅" if one_hour else "❌"
+                fifteen_min_status = "✅" if fifteen_minutes else "❌"
+                five_min_status = "✅" if five_minutes else "❌"
+                
+                embed = disnake.Embed(
+                    title="🔔 Reminder Settings Updated",
+                    description=f"**Overall Status:** {status}",
+                    color=disnake.Color.green() if enabled else disnake.Color.red()
+                )
+                
+                embed.add_field(
+                    name="Reminder Timing",
+                    value=f"{one_hour_status} 1 hour before\n"
+                          f"{fifteen_min_status} 15 minutes before\n"
+                          f"{five_min_status} 5 minutes before",
+                    inline=False
+                )
+                
+                embed.set_footer(text="Reminders are sent automatically based on your event time")
+                
+                await inter.response.send_message(embed=embed, ephemeral=True)
+            else:
+                await inter.response.send_message(
+                    "❌ Failed to save reminder settings. Please try again.",
+                    ephemeral=True
+                )
+                
+        except Exception as e:
+            await inter.response.send_message(
+                f"❌ **Error Configuring Reminders**\n"
+                f"An error occurred: {str(e)}",
+                ephemeral=True
+            )
     
     @commands.slash_command(
         name="view_rsvps",

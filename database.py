@@ -323,3 +323,80 @@ async def get_rsvp_responses(post_id: str) -> List[dict]:
     except Exception as e:
         print(f"Error getting RSVP responses for post {post_id}: {e}")
         return []
+
+async def save_reminder_sent(post_id: str, guild_id: int, reminder_type: str, event_date: date) -> bool:
+    """
+    Save a reminder send record to prevent duplicates.
+    
+    Args:
+        post_id: UUID of the daily post
+        guild_id: Discord guild ID
+        reminder_type: Type of reminder ('1_hour', '15_minutes', '5_minutes')
+        event_date: Date of the event
+    
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        client = get_supabase_client()
+        
+        insert_data = {
+            'post_id': post_id,
+            'guild_id': guild_id,
+            'reminder_type': reminder_type,
+            'event_date': event_date.isoformat()
+        }
+        
+        result = client.table('reminder_sends').insert(insert_data).execute()
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error saving reminder sent record for post {post_id}, type {reminder_type}: {e}")
+        return False
+
+async def check_reminder_sent(post_id: str, reminder_type: str) -> bool:
+    """
+    Check if a reminder of a specific type has already been sent for a post.
+    
+    Args:
+        post_id: UUID of the daily post
+        reminder_type: Type of reminder ('1_hour', '15_minutes', '5_minutes')
+    
+    Returns:
+        True if reminder was already sent, False otherwise
+    """
+    try:
+        client = get_supabase_client()
+        
+        result = client.table('reminder_sends').select('id').eq('post_id', post_id).eq('reminder_type', reminder_type).execute()
+        
+        return len(result.data) > 0
+        
+    except Exception as e:
+        print(f"Error checking reminder sent for post {post_id}, type {reminder_type}: {e}")
+        return False
+
+async def get_guilds_needing_reminders() -> List[dict]:
+    """
+    Get all guilds that have events today and need reminders sent.
+    
+    Returns:
+        List of guild data with reminder settings
+    """
+    try:
+        client = get_supabase_client()
+        
+        # Get all guilds with schedules and settings
+        result = client.table('weekly_schedules').select(
+            'guild_id, guild_settings!inner(*)'
+        ).execute()
+        
+        if not result.data:
+            return []
+        
+        return result.data
+        
+    except Exception as e:
+        print(f"Error getting guilds needing reminders: {e}")
+        return []
