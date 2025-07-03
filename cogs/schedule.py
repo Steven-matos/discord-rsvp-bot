@@ -421,14 +421,6 @@ class ScheduleCog(commands.Cog):
         return embed
     
     @commands.slash_command(
-        name="test_command",
-        description="Test if slash commands are working"
-    )
-    async def test_command(self, inter: disnake.ApplicationCommandInteraction):
-        """Test command to verify slash commands work"""
-        await inter.response.send_message("✅ Slash commands are working!", ephemeral=True)
-    
-    @commands.slash_command(
         name="list_commands",
         description="List all available commands (admin only)"
     )
@@ -436,17 +428,19 @@ class ScheduleCog(commands.Cog):
     async def list_commands(self, inter: disnake.ApplicationCommandInteraction):
         """List all available commands"""
         commands_list = [
-            "• `/setup_weekly_schedule` - Set up weekly events",
-            "• `/set_event_channel` - Set event posting channel", 
-            "• `/set_event_time` - Set event time (Eastern)",
-            "• `/configure_reminders` - Configure reminder settings",
-            "• `/test_daily_event` - Test daily event posting",
-            "• `/test_reminder` - Test reminder system",
-            "• `/view_rsvps` - View RSVP responses for today",
-            "• `/view_yesterday_rsvps` - View RSVP responses for yesterday",
-            "• `/list_commands` - List all commands (this command)",
-            "• `/force_sync` - Force sync commands to Discord",
-            "• `/test_command` - Test if commands work"
+            "**📅 `/setup_weekly_schedule`** - Create your weekly event schedule. This walks you through setting up events for each day of the week with event names, outfits, and vehicles.",
+            "",
+            "**📢 `/set_event_channel`** - Choose which channel the bot will post daily events to. This is where members will see event announcements and RSVP buttons.",
+            "",
+            "**⏰ `/set_event_time`** - Set what time your events start each day (in Eastern Time). This affects when reminders are sent.",
+            "",
+            "**🔔 `/configure_reminders`** - Control when reminder messages are sent. You can enable/disable reminders at 4 PM, 1 hour before, and 15 minutes before events.",
+            "",
+            "**👥 `/view_rsvps`** - See who has RSVP'd for today's event. Shows who's coming, who's not, who's maybe, and who's on mobile.",
+            "",
+            "**📊 `/view_yesterday_rsvps`** - Check RSVP responses from yesterday's event. Useful for tracking attendance patterns.",
+            "",
+            "**🔄 `/force_sync`** - Refresh the bot's commands in Discord. Use this if commands aren't appearing properly."
         ]
         
         embed = disnake.Embed(
@@ -549,152 +543,6 @@ class ScheduleCog(commands.Cog):
                 f"An error occurred: {str(e)}",
                 ephemeral=True
             )
-    
-    @commands.slash_command(
-        name="test_daily_event",
-        description="Test the daily event posting (for testing purposes)"
-    )
-    @commands.default_member_permissions(manage_guild=True)
-    async def test_daily_event(self, inter: disnake.ApplicationCommandInteraction):
-        """Test posting today's event"""
-        guild_id = inter.guild.id
-        
-        # Get guild settings
-        guild_settings = await database.get_guild_settings(guild_id)
-        if not guild_settings or not guild_settings.get('event_channel_id'):
-            await inter.response.send_message(
-                "❌ **No Event Channel Set!**\n"
-                "Please use `/set_event_channel` to set a channel first.",
-                ephemeral=True
-            )
-            return
-        
-        channel = inter.guild.get_channel(guild_settings['event_channel_id'])
-        if not channel:
-            await inter.response.send_message(
-                "❌ **Event Channel Not Found!**\n"
-                "The configured event channel no longer exists.",
-                ephemeral=True
-            )
-            return
-        
-        # Post today's event
-        try:
-            await self.post_todays_event(inter.guild, channel)
-            await inter.response.send_message(
-                f"✅ **Test Event Posted!**\n"
-                f"Today's event has been posted to {channel.mention}",
-                ephemeral=True
-            )
-        except Exception as e:
-            await inter.response.send_message(
-                f"❌ **Failed to Post Event**\n"
-                f"Error: {str(e)}",
-                ephemeral=True
-            )
-    
-    @commands.slash_command(
-        name="test_reminder",
-        description="Test the reminder system (sends reminder in 10 seconds)"
-    )
-    @commands.default_member_permissions(manage_guild=True)
-    async def test_reminder(self, inter: disnake.ApplicationCommandInteraction):
-        """Test the reminder system"""
-        guild_id = inter.guild.id
-        
-        # Get guild settings
-        guild_settings = await database.get_guild_settings(guild_id)
-        if not guild_settings or not guild_settings.get('event_channel_id'):
-            await inter.response.send_message(
-                "❌ **No Event Channel Set!**\n"
-                "Please use `/set_event_channel` to set a channel first.",
-                ephemeral=True
-            )
-            return
-        
-        channel = inter.guild.get_channel(guild_settings['event_channel_id'])
-        if not channel:
-            await inter.response.send_message(
-                "❌ **Event Channel Not Found!**",
-                ephemeral=True
-            )
-            return
-        
-        await inter.response.send_message(
-            "⏰ **Testing Reminders!**\n"
-            "First reminder in 10 seconds, second reminder in 20 seconds.",
-            ephemeral=True
-        )
-        
-        # Schedule test reminders
-        asyncio.create_task(self.send_test_reminders(channel))
-    
-    async def send_test_reminders(self, channel: disnake.TextChannel):
-        """Send test reminders"""
-        # Get today's event data
-        guild_id = channel.guild.id
-        today = datetime.now(timezone.utc)
-        day_name = calendar.day_name[today.weekday()].lower()
-        
-        schedule = await database.get_guild_schedule(guild_id)
-        if day_name not in schedule:
-            await channel.send("⚠️ No event scheduled for today to remind about.")
-            return
-        
-        event_data = schedule[day_name]
-        
-        # Get guild settings for event time
-        guild_settings = await database.get_guild_settings(guild_id)
-        event_time_str = guild_settings.get('event_time', '20:00:00') if guild_settings else '20:00:00'
-        event_time = datetime.strptime(event_time_str, '%H:%M:%S').time()
-        
-        # Create event datetime in Eastern time
-        eastern_now = datetime.now(self.eastern_tz)
-        event_datetime_eastern = eastern_now.replace(
-            year=today.year, 
-            month=today.month, 
-            day=today.day,
-            hour=event_time.hour,
-            minute=event_time.minute,
-            second=0,
-            microsecond=0
-        )
-        
-        # Convert to UTC for display
-        event_datetime_utc = event_datetime_eastern.astimezone(timezone.utc)
-        
-        # Format times for display
-        eastern_time_display = event_datetime_eastern.strftime("%I:%M %p ET")
-        utc_time_display = event_datetime_utc.strftime("%I:%M %p UTC")
-        time_text = f"**{eastern_time_display}** / **{utc_time_display}**"
-        
-        # First reminder (10 seconds)
-        await asyncio.sleep(10)
-        embed1 = disnake.Embed(
-            title="🔔 Event Reminder - 1 Hour",
-            description=f"**{event_data['event_name']}** starts in 1 hour!",
-            color=disnake.Color.orange()
-        )
-        embed1.add_field(name="👔 Outfit", value=event_data['outfit'], inline=True)
-        embed1.add_field(name="🚗 Vehicle", value=event_data['vehicle'], inline=True)
-        embed1.add_field(name="⏰ Time", value=time_text, inline=False)
-        embed1.set_footer(text="Don't forget to RSVP if you haven't already!")
-        
-        await channel.send("@everyone", embed=embed1)
-        
-        # Second reminder (20 seconds total)
-        await asyncio.sleep(10)
-        embed2 = disnake.Embed(
-            title="🚨 Final Reminder - 15 Minutes",
-            description=f"**{event_data['event_name']}** starts in 15 minutes!",
-            color=disnake.Color.red()
-        )
-        embed2.add_field(name="👔 Outfit", value=event_data['outfit'], inline=True)
-        embed2.add_field(name="🚗 Vehicle", value=event_data['vehicle'], inline=True)
-        embed2.add_field(name="⏰ Time", value=time_text, inline=False)
-        embed2.set_footer(text="Last chance to join!")
-        
-        await channel.send("@everyone", embed=embed2)
     
     @commands.slash_command(
         name="set_event_time",
@@ -817,7 +665,6 @@ class ScheduleCog(commands.Cog):
         name="view_rsvps",
         description="View RSVP responses for today's event"
     )
-    @commands.default_member_permissions(manage_guild=True)
     async def view_rsvps(self, inter: disnake.ApplicationCommandInteraction):
         """View RSVP responses for today's event"""
         guild_id = inter.guild.id
@@ -942,7 +789,6 @@ class ScheduleCog(commands.Cog):
         name="view_yesterday_rsvps",
         description="View RSVP responses for yesterday's event"
     )
-    @commands.default_member_permissions(manage_guild=True)
     async def view_yesterday_rsvps(self, inter: disnake.ApplicationCommandInteraction):
         """View RSVP responses for yesterday's event"""
         guild_id = inter.guild.id
