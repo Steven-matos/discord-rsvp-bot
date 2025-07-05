@@ -42,6 +42,46 @@ class ScheduleDayModal(disnake.ui.Modal):
             ]
         )
 
+class EditEventModal(disnake.ui.Modal):
+    def __init__(self, day: str, guild_id: int, current_data: dict = None):
+        self.day = day
+        self.guild_id = guild_id
+        self.current_data = current_data or {}
+        
+        super().__init__(
+            title=f"Edit Event - {day.capitalize()}",
+            custom_id=f"edit_modal_{day}_{guild_id}",
+            components=[
+                disnake.ui.TextInput(
+                    label="Event Name",
+                    placeholder="Enter the event name for this day",
+                    custom_id="event_name",
+                    style=disnake.TextInputStyle.short,
+                    required=True,
+                    max_length=100,
+                    value=self.current_data.get('event_name', '')
+                ),
+                disnake.ui.TextInput(
+                    label="Outfit",
+                    placeholder="Enter the outfit/gear for this event",
+                    custom_id="outfit",
+                    style=disnake.TextInputStyle.short,
+                    required=True,
+                    max_length=100,
+                    value=self.current_data.get('outfit', '')
+                ),
+                disnake.ui.TextInput(
+                    label="Vehicle",
+                    placeholder="Enter the vehicle for this event",
+                    custom_id="vehicle",
+                    style=disnake.TextInputStyle.short,
+                    required=True,
+                    max_length=100,
+                    value=self.current_data.get('vehicle', '')
+                )
+            ]
+        )
+
 class NextDayButton(disnake.ui.View):
     def __init__(self, next_day: str, guild_id: int):
         super().__init__(timeout=300)  # 5 minute timeout
@@ -430,6 +470,10 @@ class ScheduleCog(commands.Cog):
         commands_list = [
             "**📅 `/setup_weekly_schedule`** - Create your weekly event schedule. This walks you through setting up events for each day of the week with event names, outfits, and vehicles.",
             "",
+            "**📋 `/view_schedule`** - View the current weekly schedule to see all events for each day of the week.",
+            "",
+            "**✏️ `/edit_event`** - Edit an existing event for any day of the week. Change the event name, outfit, or vehicle.",
+            "",
             "**📢 `/set_event_channel`** - Choose which channel the bot will post daily events to. This is where members will see event announcements and RSVP buttons.",
             "",
             "**⏰ `/set_event_time`** - Set what time your events start each day (in Eastern Time). This affects when reminders are sent.",
@@ -657,6 +701,107 @@ class ScheduleCog(commands.Cog):
         except Exception as e:
             await inter.response.send_message(
                 f"❌ **Error Configuring Reminders**\n"
+                f"An error occurred: {str(e)}",
+                ephemeral=True
+            )
+    
+    @commands.slash_command(
+        name="edit_event",
+        description="Edit an existing event for a specific day (admin only)"
+    )
+    @commands.default_member_permissions(manage_guild=True)
+    async def edit_event(
+        self, 
+        inter: disnake.ApplicationCommandInteraction,
+        day: str = commands.Param(
+            description="Day of the week to edit",
+            choices=["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        )
+    ):
+        """Edit an existing event for a specific day"""
+        try:
+            guild_id = inter.guild.id
+            
+            # Get current schedule
+            schedule = await database.get_guild_schedule(guild_id)
+            
+            if not schedule or day not in schedule:
+                await inter.response.send_message(
+                    f"❌ **No Event Found**\n"
+                    f"No event is currently scheduled for {day.capitalize()}.",
+                    ephemeral=True
+                )
+                return
+            
+            # Get current event data
+            current_data = schedule[day]
+            
+            # Create and show edit modal
+            modal = EditEventModal(day, guild_id, current_data)
+            await inter.response.send_modal(modal)
+            
+        except Exception as e:
+            await inter.response.send_message(
+                f"❌ **Error Editing Event**\n"
+                f"An error occurred: {str(e)}",
+                ephemeral=True
+            )
+    
+    @commands.slash_command(
+        name="view_schedule",
+        description="View the current weekly schedule (admin only)"
+    )
+    @commands.default_member_permissions(manage_guild=True)
+    async def view_schedule(self, inter: disnake.ApplicationCommandInteraction):
+        """View the current weekly schedule"""
+        try:
+            guild_id = inter.guild.id
+            
+            # Get current schedule
+            schedule = await database.get_guild_schedule(guild_id)
+            
+            if not schedule:
+                await inter.response.send_message(
+                    "❌ **No Schedule Found**\n"
+                    "No weekly schedule has been set up for this server yet.\n"
+                    "Use `/setup_weekly_schedule` to create one.",
+                    ephemeral=True
+                )
+                return
+            
+            # Create embed with schedule
+            embed = disnake.Embed(
+                title="📅 Weekly Schedule",
+                description=f"Current schedule for **{inter.guild.name}**",
+                color=disnake.Color.blue()
+            )
+            
+            days_ordered = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+            
+            for day in days_ordered:
+                if day in schedule:
+                    event_data = schedule[day]
+                    embed.add_field(
+                        name=f"{day.capitalize()}",
+                        value=f"**Event:** {event_data.get('event_name', 'N/A')}\n"
+                              f"**Outfit:** {event_data.get('outfit', 'N/A')}\n"
+                              f"**Vehicle:** {event_data.get('vehicle', 'N/A')}",
+                        inline=True
+                    )
+                else:
+                    embed.add_field(
+                        name=f"{day.capitalize()}",
+                        value="No event scheduled",
+                        inline=True
+                    )
+            
+            embed.set_footer(text="Use /edit_event to modify any day's event")
+            
+            await inter.response.send_message(embed=embed, ephemeral=True)
+            
+        except Exception as e:
+            await inter.response.send_message(
+                f"❌ **Error Viewing Schedule**\n"
                 f"An error occurred: {str(e)}",
                 ephemeral=True
             )
@@ -911,11 +1056,11 @@ class ScheduleCog(commands.Cog):
     
     @commands.Cog.listener()
     async def on_modal_submit(self, inter: disnake.ModalInteraction):
-        """Handle modal submissions for schedule setup"""
+        """Handle modal submissions for schedule setup and editing"""
         custom_id = inter.custom_id
         
-        # Check if this is a schedule modal
-        if not custom_id.startswith("schedule_modal_"):
+        # Check if this is a schedule modal or edit modal
+        if not (custom_id.startswith("schedule_modal_") or custom_id.startswith("edit_modal_")):
             return
         
         try:
@@ -923,14 +1068,7 @@ class ScheduleCog(commands.Cog):
             parts = custom_id.split("_")
             day = parts[2]
             guild_id = int(parts[3])
-            
-            # Verify this guild is in setup process
-            if guild_id not in self.current_setups:
-                await inter.response.send_message(
-                    "❌ No active setup found for this server.",
-                    ephemeral=True
-                )
-                return
+            is_edit = custom_id.startswith("edit_modal_")
             
             # Extract form data
             event_name = inter.text_values["event_name"]
@@ -943,6 +1081,38 @@ class ScheduleCog(commands.Cog):
                 "outfit": outfit,
                 "vehicle": vehicle
             }
+            
+            if is_edit:
+                # Handle edit modal
+                success = await database.update_day_data(guild_id, day, day_data)
+                
+                if success:
+                    embed = disnake.Embed(
+                        title="✅ Event Updated Successfully",
+                        description=f"**{day.capitalize()}** event has been updated.",
+                        color=disnake.Color.green()
+                    )
+                    embed.add_field(name="Event", value=event_name, inline=True)
+                    embed.add_field(name="Outfit", value=outfit, inline=True)
+                    embed.add_field(name="Vehicle", value=vehicle, inline=True)
+                    embed.set_footer(text="The updated event will be used for future posts")
+                    
+                    await inter.response.send_message(embed=embed, ephemeral=True)
+                else:
+                    await inter.response.send_message(
+                        f"❌ Failed to update {day.capitalize()} event. Please try again.",
+                        ephemeral=True
+                    )
+                return
+            
+            # Handle schedule setup modal
+            # Verify this guild is in setup process
+            if guild_id not in self.current_setups:
+                await inter.response.send_message(
+                    "❌ No active setup found for this server.",
+                    ephemeral=True
+                )
+                return
             
             # Save to database
             success = await database.save_day_data(guild_id, day, day_data)

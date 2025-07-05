@@ -400,3 +400,31 @@ async def get_guilds_needing_reminders() -> List[dict]:
     except Exception as e:
         print(f"Error getting guilds needing reminders: {e}")
         return []
+
+async def update_day_data(guild_id: int, day: str, data: dict) -> bool:
+    """
+    Update day data for a guild's weekly schedule.
+    
+    Args:
+        guild_id: Discord guild ID
+        day: Day of the week (e.g., "monday", "tuesday")
+        data: Dictionary containing updated event data
+    
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        client = get_supabase_client()
+        
+        # Column name for the day (e.g., "monday_data", "tuesday_data")
+        day_column = f"{day}_data"
+        
+        # Update the specific day column
+        update_data = {day_column: json.dumps(data), 'updated_at': 'now()'}
+        result = client.table('weekly_schedules').update(update_data).eq('guild_id', guild_id).execute()
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error updating day data for guild {guild_id}, day {day}: {e}")
+        return False

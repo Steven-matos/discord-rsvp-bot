@@ -106,6 +106,12 @@ URL: https://discord.com/oauth2/authorize?client_id=1388283299562262559&permissi
    ```
    This sends reminders at 4 PM, 1 hour before, and 15 minutes before events.
 
+5. **View and edit your schedule** (optional)
+   ```
+   /view_schedule
+   ```
+   See your complete weekly schedule. Use `/edit_event [day]` to modify any event.
+
 ### Example Weekly Schedule
 
 Here's what a typical setup might look like:
@@ -117,6 +123,18 @@ Here's what a typical setup might look like:
 - **Friday**: "Weekend Prep" | Weekend Gear | SUV
 
 ## 📋 How Members Use the Bot
+
+## 🛠️ Managing Your Events
+
+### Viewing Your Schedule
+- **`/view_schedule`** - See your complete weekly schedule with all events
+- Shows each day with event name, outfit, and vehicle requirements
+
+### Editing Events
+- **`/edit_event [day]`** - Modify any day's event
+- Change the event name, outfit, or vehicle
+- Updates take effect immediately for future posts
+- Only admins can edit events
 
 ### RSVP Options
 
@@ -140,6 +158,8 @@ Anyone can see who's coming to events:
 | Command | What It Does | Who Can Use |
 |---------|-------------|-------------|
 | `/setup_weekly_schedule` | Create or change your weekly events | Server Admins |
+| `/view_schedule` | View the current weekly schedule | Server Admins |
+| `/edit_event` | Edit an existing event for any day | Server Admins |
 | `/set_event_channel` | Choose where events are posted | Server Admins |
 | `/set_event_time` | Set what time events start | Server Admins |
 | `/configure_reminders` | Control when reminders are sent | Server Admins |
@@ -200,6 +220,8 @@ If something isn't working:
 
 ## 🎉 What's New
 
+- ✅ **Event Editing**: Admins can now edit existing events with `/edit_event`
+- ✅ **Schedule Viewing**: View your complete weekly schedule with `/view_schedule`
 - ✅ **Mobile Support**: Special RSVP option for mobile users
 - ✅ **Smart Reminders**: Automatic reminders at multiple times
 - ✅ **Easy Setup**: Step-by-step weekly schedule creation
