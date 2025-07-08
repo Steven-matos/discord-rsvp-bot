@@ -98,6 +98,7 @@ CREATE TABLE guild_settings (
     
     -- Channel settings
     event_channel_id BIGINT, -- Channel where daily events are posted
+    admin_channel_id BIGINT, -- Channel for admin notifications (optional)
     
     -- Timing settings
     post_time TIME DEFAULT '09:00:00', -- Daily post time (UTC)
@@ -124,12 +125,34 @@ CREATE TRIGGER update_guild_settings_updated_at
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
+-- Table: admin_notifications
+-- Tracks admin notifications to prevent spam
+CREATE TABLE admin_notifications (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    notification_date DATE NOT NULL,
+    notification_type VARCHAR(50) NOT NULL DEFAULT 'schedule_not_setup',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- One notification per guild per date per type
+    UNIQUE(guild_id, notification_date, notification_type),
+    
+    -- Foreign key constraint
+    FOREIGN KEY (guild_id) REFERENCES weekly_schedules(guild_id) ON DELETE CASCADE
+);
+
+-- Indexes for admin_notifications
+CREATE INDEX idx_admin_notifications_guild_id ON admin_notifications(guild_id);
+CREATE INDEX idx_admin_notifications_date ON admin_notifications(notification_date);
+CREATE INDEX idx_admin_notifications_guild_date ON admin_notifications(guild_id, notification_date);
+
 -- Row Level Security (RLS) - Optional but recommended
 -- Enable RLS on all tables
 ALTER TABLE weekly_schedules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rsvp_responses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guild_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admin_notifications ENABLE ROW LEVEL SECURITY;
 
 -- Create policies for anon access (adjust based on your security needs)
 -- These policies allow full access with the anon key - modify as needed for production
@@ -143,6 +166,9 @@ CREATE POLICY "Allow all operations for anon users" ON rsvp_responses
     FOR ALL USING (true) WITH CHECK (true);
 
 CREATE POLICY "Allow all operations for anon users" ON guild_settings
+    FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Allow all operations for anon users" ON admin_notifications
     FOR ALL USING (true) WITH CHECK (true);
 
 -- Sample data structure for reference

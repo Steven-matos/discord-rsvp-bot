@@ -221,6 +221,14 @@ class ScheduleCog(commands.Cog):
         today = datetime.now(timezone.utc)
         day_name = calendar.day_name[today.weekday()].lower()
         
+        # Check if current week's schedule is set up
+        is_current_week_setup = await self.check_current_week_setup(guild_id)
+        
+        if not is_current_week_setup:
+            # Send admin notification instead of posting old schedule
+            await self.notify_admins_no_schedule(guild, channel)
+            return
+        
         # Get schedule for this guild
         schedule = await database.get_guild_schedule(guild_id)
         
@@ -306,6 +314,85 @@ class ScheduleCog(commands.Cog):
         # Update the view with the real post ID
         if post_id:
             view.post_id = post_id
+    
+    async def check_current_week_setup(self, guild_id: int) -> bool:
+        """Check if the current week's schedule has been set up"""
+        try:
+            # Get the schedule
+            schedule = await database.get_guild_schedule(guild_id)
+            
+            if not schedule:
+                return False
+            
+            # Check if the schedule was updated this week
+            schedule_updated = await database.get_schedule_last_updated(guild_id)
+            
+            if not schedule_updated:
+                return False
+            
+            # Get the start of the current week (Monday)
+            today = datetime.now(timezone.utc)
+            days_since_monday = today.weekday()
+            start_of_week = today - timedelta(days=days_since_monday)
+            start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # Check if schedule was updated this week
+            return schedule_updated >= start_of_week
+            
+        except Exception as e:
+            print(f"Error checking current week setup for guild {guild_id}: {e}")
+            return False
+    
+    async def notify_admins_no_schedule(self, guild: disnake.Guild, channel: disnake.TextChannel):
+        """Notify admins that the current week's schedule hasn't been set up"""
+        try:
+            # Check if we've already notified today
+            today = datetime.now(timezone.utc).date()
+            if await database.check_admin_notification_sent(guild.id, today):
+                return  # Already notified today
+            
+            # Get guild settings to find admin channel or use current channel
+            guild_settings = await database.get_guild_settings(guild.id)
+            admin_channel_id = guild_settings.get('admin_channel_id') if guild_settings else None
+            
+            # Use admin channel if set, otherwise use the event channel
+            target_channel = guild.get_channel(admin_channel_id) if admin_channel_id else channel
+            
+            # Create notification embed
+            embed = disnake.Embed(
+                title="⚠️ Weekly Schedule Not Set Up",
+                description="The current week's schedule has not been configured yet.",
+                color=disnake.Color.orange(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            
+            embed.add_field(
+                name="📅 Action Required",
+                value="Please use `/setup_weekly_schedule` to configure this week's events.",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="ℹ️ Note",
+                value="Daily posts will not be made until the schedule is set up.",
+                inline=False
+            )
+            
+            embed.set_footer(text="This notification is only visible to administrators")
+            
+            # Send to admins only (ephemeral message in the channel)
+            # Since we can't send ephemeral messages to a channel, we'll send a regular message
+            # but mention that it's for admins
+            await target_channel.send(
+                content="🔔 **Admin Notification**",
+                embed=embed
+            )
+            
+            # Mark that we've sent the notification today
+            await database.save_admin_notification_sent(guild.id, today)
+            
+        except Exception as e:
+            print(f"Error notifying admins for guild {guild.id}: {e}")
     
     async def check_and_send_reminders(self):
         """Check all guilds and send reminders if needed"""
@@ -701,6 +788,43 @@ class ScheduleCog(commands.Cog):
         except Exception as e:
             await inter.response.send_message(
                 f"❌ **Error Configuring Reminders**\n"
+                f"An error occurred: {str(e)}",
+                ephemeral=True
+            )
+    
+    @commands.slash_command(
+        name="set_admin_channel",
+        description="Set the channel for admin notifications (admin only)"
+    )
+    @commands.default_member_permissions(manage_guild=True)
+    async def set_admin_channel(
+        self, 
+        inter: disnake.ApplicationCommandInteraction,
+        channel: disnake.TextChannel = commands.Param(description="Channel for admin notifications")
+    ):
+        """Set the channel for admin notifications"""
+        try:
+            guild_id = inter.guild.id
+            
+            # Save to database
+            success = await database.save_guild_settings(guild_id, {"admin_channel_id": channel.id})
+            
+            if success:
+                await inter.response.send_message(
+                    f"✅ **Admin Channel Set!**\n"
+                    f"Admin notifications will be sent to <#{channel.id}>\n"
+                    f"This includes notifications when weekly schedules haven't been set up.",
+                    ephemeral=True
+                )
+            else:
+                await inter.response.send_message(
+                    "❌ Failed to save admin channel. Please try again.",
+                    ephemeral=True
+                )
+                
+        except Exception as e:
+            await inter.response.send_message(
+                f"❌ **Error Setting Admin Channel**\n"
                 f"An error occurred: {str(e)}",
                 ephemeral=True
             )

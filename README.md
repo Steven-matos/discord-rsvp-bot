@@ -220,6 +220,28 @@ If something isn't working:
 
 ## 🎉 What's New
 
+### Latest Update: Weekly Schedule Bug Fix ✅
+**Fixed a critical bug where the bot would post outdated schedules when a new week wasn't set up.**
+
+#### What Changed:
+- **No More Outdated Posts**: Bot now checks if current week's schedule is set up before posting
+- **Admin Notifications**: Sends admin alerts instead of posting old schedules when new week isn't configured
+- **Smart Validation**: Compares schedule's last updated timestamp with current week
+- **Anti-Spam**: Notifications limited to once per day per server
+- **New Command**: `/set_admin_channel` to specify where admin notifications are sent
+
+#### How It Works:
+1. **Daily Check**: At 9 AM Eastern, bot validates current week's schedule
+2. **Smart Response**: Posts normally if schedule is current, sends admin notification if outdated
+3. **Admin Awareness**: Admins get notified when they need to set up the weekly schedule
+4. **Flexible Configuration**: Choose where admin notifications are sent
+
+#### Database Updates Required:
+Run the safe migration file `database_schemas/complete_schema_update_safe.sql` in your Supabase SQL Editor to enable these features.
+
+---
+
+### Previous Features:
 - ✅ **Event Editing**: Admins can now edit existing events with `/edit_event`
 - ✅ **Schedule Viewing**: View your complete weekly schedule with `/view_schedule`
 - ✅ **Mobile Support**: Special RSVP option for mobile users

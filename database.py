@@ -2,7 +2,7 @@ import os
 import json
 from supabase import create_client, Client # type: ignore
 from typing import Dict, Optional, List
-from datetime import date
+from datetime import date, datetime
 
 # Load environment variables from .env file
 from dotenv import load_dotenv # type: ignore
@@ -190,6 +190,88 @@ async def get_guild_settings(guild_id: int) -> dict:
     except Exception as e:
         print(f"Error getting guild settings for guild {guild_id}: {e}")
         return {}
+
+async def get_schedule_last_updated(guild_id: int) -> Optional[datetime]:
+    """
+    Get the last updated timestamp for a guild's schedule.
+    
+    Args:
+        guild_id: Discord guild ID
+    
+    Returns:
+        datetime object of last update, None if not found
+    """
+    try:
+        client = get_supabase_client()
+        
+        result = client.table('weekly_schedules').select('updated_at').eq('guild_id', guild_id).execute()
+        
+        if not result.data:
+            return None
+        
+        # Parse the timestamp string to datetime object
+        timestamp_str = result.data[0]['updated_at']
+        return datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        
+    except Exception as e:
+        print(f"Error getting schedule last updated for guild {guild_id}: {e}")
+        return None
+
+async def save_admin_notification_sent(guild_id: int, notification_date: date) -> bool:
+    """
+    Save that an admin notification was sent for a specific date.
+    
+    Args:
+        guild_id: Discord guild ID
+        notification_date: Date when notification was sent
+    
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        client = get_supabase_client()
+        
+        # Check if notification record already exists
+        existing_result = client.table('admin_notifications').select('id').eq('guild_id', guild_id).eq('notification_date', notification_date.isoformat()).execute()
+        
+        if existing_result.data:
+            return True  # Already recorded
+        
+        # Create new notification record
+        insert_data = {
+            'guild_id': guild_id,
+            'notification_date': notification_date.isoformat(),
+            'notification_type': 'schedule_not_setup'
+        }
+        
+        result = client.table('admin_notifications').insert(insert_data).execute()
+        return True
+        
+    except Exception as e:
+        print(f"Error saving admin notification for guild {guild_id}: {e}")
+        return False
+
+async def check_admin_notification_sent(guild_id: int, notification_date: date) -> bool:
+    """
+    Check if an admin notification was already sent for a specific date.
+    
+    Args:
+        guild_id: Discord guild ID
+        notification_date: Date to check
+    
+    Returns:
+        True if notification was sent, False otherwise
+    """
+    try:
+        client = get_supabase_client()
+        
+        result = client.table('admin_notifications').select('id').eq('guild_id', guild_id).eq('notification_date', notification_date.isoformat()).execute()
+        
+        return len(result.data) > 0
+        
+    except Exception as e:
+        print(f"Error checking admin notification for guild {guild_id}: {e}")
+        return False
 
 async def save_daily_post(guild_id: int, channel_id: int, message_id: int, event_date: date, day_of_week: str, event_data: dict) -> Optional[str]:
     """

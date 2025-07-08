@@ -72,6 +72,24 @@ Vehicle: Tank
 /configure_reminders enabled:true four_pm:true one_hour:true fifteen_minutes:true
 ```
 
+#### `/set_admin_channel`
+**What it does:** Sets the channel where admin notifications are sent (like "schedule not set up" alerts).
+
+**How to use:**
+1. Type `/set_admin_channel`
+2. Select the channel where you want admin notifications sent
+3. The bot will confirm the channel is set
+
+**Example:**
+```
+/set_admin_channel #admin-notifications
+```
+
+**When it's used:**
+- Admin notifications are sent when the current week's schedule hasn't been set up
+- Helps prevent the bot from posting outdated schedules
+- Only one notification per day to avoid spam
+
 ### Management Commands
 
 #### `/view_schedule`
@@ -225,6 +243,7 @@ Raid Night
 | `/set_event_channel` | Choose posting channel | Admins | None |
 | `/set_event_time` | Set event start time | Admins | None |
 | `/configure_reminders` | Control reminders | Admins | None |
+| `/set_admin_channel` | Set admin notification channel | Admins | None |
 | `/view_rsvps` | See today's responses | Everyone | Event must be posted |
 | `/view_yesterday_rsvps` | See yesterday's responses | Everyone | Event must have been posted |
 | `/list_commands` | Show all commands | Admins | None |
