@@ -567,6 +567,8 @@ class ScheduleCog(commands.Cog):
             "",
             "**🔔 `/configure_reminders`** - Control when reminder messages are sent. You can enable/disable reminders at 4 PM, 1 hour before, and 15 minutes before events.",
             "",
+            "**🔔 `/set_admin_channel`** - Set the channel for admin notifications. This is where alerts about schedule issues (like 'schedule not set up') will be sent.",
+            "",
             "**👥 `/view_rsvps`** - See who has RSVP'd for today's event. Shows who's coming, who's not, who's maybe, and who's on mobile.",
             "",
             "**📊 `/view_yesterday_rsvps`** - Check RSVP responses from yesterday's event. Useful for tracking attendance patterns.",
