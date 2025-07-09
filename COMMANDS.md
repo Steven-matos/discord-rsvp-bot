@@ -4,7 +4,7 @@ This document contains all available commands for the Discord RSVP Bot, organize
 
 ## 🔧 Admin Commands
 
-*These commands require "Manage Guild" permissions*
+*These commands require "Manage Guild" permissions OR the specific user ID (300157754012860425)*
 
 ### Setup Commands
 
@@ -128,6 +128,35 @@ Wednesday: No event scheduled
 /edit_event day:monday
 ```
 *Then modify the form that appears*
+
+#### `/force_post_rsvp`
+**What it does:** Manually posts today's RSVP if the automatic daily posting failed or didn't happen.
+
+**How to use:**
+1. Type `/force_post_rsvp`
+2. The bot will check:
+   - If today's RSVP was already posted
+   - If the event channel is configured
+   - If the bot has proper permissions in the channel
+   - If the weekly schedule is set up
+3. If all checks pass, it will post today's RSVP to the configured event channel
+
+**When to use it:**
+- The automatic daily posting at 9:00 AM Eastern didn't work
+- You want to post today's RSVP manually
+- You're testing the bot's posting functionality
+
+**Error messages you might see:**
+- "Today's RSVP has already been posted" - Check the event channel for existing post
+- "No event channel has been configured" - Use `/set_event_channel` first
+- "Bot doesn't have permission to send messages" - Ask admin to grant Send Messages + Embed Links permissions
+- "The current week's schedule has not been set up" - Use `/setup_weekly_schedule` first
+
+**Example:**
+```
+/force_post_rsvp
+```
+*The bot will then post today's event with RSVP buttons*
 
 #### `/list_commands`
 **What it does:** Shows all available commands with descriptions.

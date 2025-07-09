@@ -146,6 +146,14 @@ async def save_guild_settings(guild_id: int, settings: dict) -> bool:
         client = get_supabase_client()
         print(f"Attempting to save guild settings for guild {guild_id}: {settings}")
         
+        # First, ensure the guild exists in weekly_schedules (required by foreign key)
+        weekly_schedule_result = client.table('weekly_schedules').select('guild_id').eq('guild_id', guild_id).execute()
+        if not weekly_schedule_result.data:
+            # Create a placeholder entry in weekly_schedules
+            placeholder_data = {'guild_id': guild_id}
+            client.table('weekly_schedules').insert(placeholder_data).execute()
+            print(f"Created placeholder weekly_schedules entry for guild {guild_id}")
+        
         # Check if guild settings already exist
         existing_result = client.table('guild_settings').select('guild_id').eq('guild_id', guild_id).execute()
         print(f"Existing settings check result: {existing_result.data}")

@@ -10,6 +10,8 @@ A friendly Discord bot that helps your community organize weekly events with eas
 - **📱 Mobile Friendly**: Special RSVP option for members on mobile devices
 - **👥 Attendance Tracking**: See who's coming to each event
 - **🔄 Automatic Posts**: Posts daily events automatically so you don't have to remember
+- **🔧 Manual Override**: Force post RSVPs if automatic posting fails
+- **👑 Admin Access**: Specific user ID can access all admin commands regardless of role
 
 ## 🚀 Getting Started
 
@@ -65,6 +67,7 @@ A friendly Discord bot that helps your community organize weekly events with eas
    - Use Slash Commands
    - Manage Messages
    - View Members
+   - Embed Links
 
 2. **Start the bot**
    ```bash
@@ -75,7 +78,7 @@ A friendly Discord bot that helps your community organize weekly events with eas
 
 ### Invite to Server
 
-URL: https://discord.com/oauth2/authorize?client_id=1388283299562262559&permissions=2147707968&integration_type=0&scope=bot
+URL: https://discord.com/oauth2/authorize?client_id=1388283299562262559&permissions=1144344644123728&integration_type=0&scope=bot
 
 ### First Time Setup (5 minutes)
 
@@ -157,16 +160,22 @@ Anyone can see who's coming to events:
 
 | Command | What It Does | Who Can Use |
 |---------|-------------|-------------|
-| `/setup_weekly_schedule` | Create or change your weekly events | Server Admins |
-| `/view_schedule` | View the current weekly schedule | Server Admins |
-| `/edit_event` | Edit an existing event for any day | Server Admins |
-| `/set_event_channel` | Choose where events are posted | Server Admins |
-| `/set_event_time` | Set what time events start | Server Admins |
-| `/configure_reminders` | Control when reminders are sent | Server Admins |
+| `/setup_weekly_schedule` | Create or change your weekly events | Server Admins + Specific User |
+| `/view_schedule` | View the current weekly schedule | Server Admins + Specific User |
+| `/edit_event` | Edit an existing event for any day | Server Admins + Specific User |
+| `/set_event_channel` | Choose where events are posted | Server Admins + Specific User |
+| `/set_event_time` | Set what time events start | Server Admins + Specific User |
+| `/configure_reminders` | Control when reminders are sent | Server Admins + Specific User |
+| `/set_admin_channel` | Set admin notification channel | Server Admins + Specific User |
+| `/force_post_rsvp` | Manually post today's RSVP if automatic posting fails | Server Admins + Specific User |
 | `/view_rsvps` | See who's coming today | Everyone |
 | `/view_yesterday_rsvps` | Check yesterday's attendance | Everyone |
-| `/list_commands` | See all available commands | Server Admins |
-| `/force_sync` | Fix command display issues | Server Admins |
+| `/list_commands` | See all available commands | Server Admins + Specific User |
+| `/force_sync` | Fix command display issues | Server Admins + Specific User |
+
+## 🔧 Special Access
+
+The bot includes a special access system for a specific user ID (300157754012860425) who can use all admin commands regardless of their role in the server. This provides backup access in case of permission issues.
 
 ## ⚙️ Automatic Features
 
@@ -199,8 +208,18 @@ The bot works automatically once you set it up:
 - Make sure you set an event time with `/set_event_time`
 - Verify the bot can send messages in your event channel
 
-### "Setup Already in Progress" Error?
-- Wait for the current setup to finish, or restart the bot
+### RSVP Posts Not Appearing?
+- Use `/force_post_rsvp` to manually post today's RSVP
+- Check bot permissions in the event channel (Send Messages, Embed Links)
+- Verify the event channel is configured with `/set_event_channel`
+- Ensure the weekly schedule is set up with `/setup_weekly_schedule`
+
+### Permission Issues?
+- The bot needs these permissions in the event channel:
+  - Send Messages
+  - Embed Links
+- Ask a server admin to grant these permissions to the bot
+- The specific user ID (300157754012860425) has access to all admin commands regardless of role
 
 ## 🎯 Tips for Success
 

@@ -5,6 +5,20 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 import calendar
 import pytz
+import functools
+
+# Specific user ID that has access to all admin commands
+ADMIN_USER_ID = 300157754012860425
+
+def check_admin_or_specific_user(inter: disnake.ApplicationCommandInteraction) -> bool:
+    """Check if user has admin permissions or is the specific user"""
+    # Check if user has manage guild permission (admin role)
+    if inter.author.guild_permissions.manage_guild:
+        return True
+    # Check if user is the specific admin user
+    if inter.author.id == ADMIN_USER_ID:
+        return True
+    return False
 
 class ScheduleDayModal(disnake.ui.Modal):
     def __init__(self, day: str, guild_id: int):
@@ -298,22 +312,46 @@ class ScheduleCog(commands.Cog):
         # Create RSVP view
         view = RSVPView("temp_id", guild_id)  # We'll update this with the real post ID
         
-        # Send the message
-        message = await channel.send(embed=embed, view=view)
+        # Check bot permissions in the channel
+        bot_member = guild.get_member(self.bot.user.id)
+        if not bot_member:
+            print(f"Bot member not found in guild {guild_id}")
+            return
         
-        # Save to database
-        post_id = await database.save_daily_post(
-            guild_id, 
-            channel.id, 
-            message.id, 
-            today.date(), 
-            day_name, 
-            event_data
-        )
+        # Check if bot has permission to send messages in this channel
+        if not channel.permissions_for(bot_member).send_messages:
+            print(f"Bot doesn't have permission to send messages in channel {channel.id} for guild {guild_id}")
+            return
         
-        # Update the view with the real post ID
-        if post_id:
-            view.post_id = post_id
+        # Check if bot has permission to embed links (needed for embeds)
+        if not channel.permissions_for(bot_member).embed_links:
+            print(f"Bot doesn't have permission to embed links in channel {channel.id} for guild {guild_id}")
+            return
+        
+        try:
+            # Send the message
+            message = await channel.send(embed=embed, view=view)
+            
+            # Save to database
+            post_id = await database.save_daily_post(
+                guild_id, 
+                channel.id, 
+                message.id, 
+                today.date(), 
+                day_name, 
+                event_data
+            )
+            
+            # Update the view with the real post ID
+            if post_id:
+                view.post_id = post_id
+                
+        except disnake.Forbidden as e:
+            print(f"Bot doesn't have permission to send messages to channel {channel.id} in guild {guild_id}: {e}")
+            return
+        except Exception as e:
+            print(f"Error posting event to channel {channel.id} in guild {guild_id}: {e}")
+            return
     
     async def check_current_week_setup(self, guild_id: int) -> bool:
         """Check if the current week's schedule has been set up"""
@@ -551,9 +589,16 @@ class ScheduleCog(commands.Cog):
         name="list_commands",
         description="List all available commands (admin only)"
     )
-    @commands.default_member_permissions(manage_guild=True)
     async def list_commands(self, inter: disnake.ApplicationCommandInteraction):
         """List all available commands"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
         commands_list = [
             "**📅 `/setup_weekly_schedule`** - Create your weekly event schedule. This walks you through setting up events for each day of the week with event names, outfits, and vehicles.",
             "",
@@ -588,9 +633,16 @@ class ScheduleCog(commands.Cog):
         name="force_sync",
         description="Force sync commands to Discord (admin only)"
     )
-    @commands.default_member_permissions(manage_guild=True)
     async def force_sync(self, inter: disnake.ApplicationCommandInteraction):
         """Force sync commands to Discord"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
         try:
             await inter.response.send_message("🔄 Force syncing commands...", ephemeral=True)
             
@@ -614,9 +666,16 @@ class ScheduleCog(commands.Cog):
         name="setup_weekly_schedule",
         description="Set up the weekly schedule for events"
     )
-    @commands.default_member_permissions(manage_guild=True)
     async def setup_weekly_schedule(self, inter: disnake.ApplicationCommandInteraction):
         """Initialize weekly schedule setup for the guild"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
         guild_id = inter.guild.id
         
         # Check if guild is already in setup process
@@ -642,13 +701,20 @@ class ScheduleCog(commands.Cog):
         description="Set the channel where daily events will be posted",
         guild_ids=None  # This makes it a global command
     )
-    @commands.default_member_permissions(manage_guild=True)
     async def set_event_channel(
         self, 
         inter: disnake.ApplicationCommandInteraction,
         channel: disnake.TextChannel = commands.Param(description="Channel for daily event posts")
     ):
         """Set the event channel for daily posts"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
         try:
             guild_id = inter.guild.id
             print(f"Setting event channel for guild {guild_id} to channel {channel.id}")
@@ -681,7 +747,6 @@ class ScheduleCog(commands.Cog):
         name="set_event_time",
         description="Set the time when events start (Eastern Time)"
     )
-    @commands.default_member_permissions(manage_guild=True)
     async def set_event_time(
         self, 
         inter: disnake.ApplicationCommandInteraction,
@@ -689,6 +754,14 @@ class ScheduleCog(commands.Cog):
         minute: int = commands.Param(description="Minute (0-59)", ge=0, le=59)
     ):
         """Set the event time in Eastern Time"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
         try:
             guild_id = inter.guild.id
             
@@ -733,7 +806,6 @@ class ScheduleCog(commands.Cog):
         name="configure_reminders",
         description="Configure reminder settings for events"
     )
-    @commands.default_member_permissions(manage_guild=True)
     async def configure_reminders(
         self, 
         inter: disnake.ApplicationCommandInteraction,
@@ -743,6 +815,14 @@ class ScheduleCog(commands.Cog):
         fifteen_minutes: bool = commands.Param(description="Send reminder 15 minutes before event", default=True)
     ):
         """Configure reminder settings"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
         try:
             guild_id = inter.guild.id
             
@@ -798,13 +878,20 @@ class ScheduleCog(commands.Cog):
         name="set_admin_channel",
         description="Set the channel for admin notifications (admin only)"
     )
-    @commands.default_member_permissions(manage_guild=True)
     async def set_admin_channel(
         self, 
         inter: disnake.ApplicationCommandInteraction,
         channel: disnake.TextChannel = commands.Param(description="Channel for admin notifications")
     ):
         """Set the channel for admin notifications"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
         try:
             guild_id = inter.guild.id
             
@@ -835,7 +922,6 @@ class ScheduleCog(commands.Cog):
         name="edit_event",
         description="Edit an existing event for a specific day (admin only)"
     )
-    @commands.default_member_permissions(manage_guild=True)
     async def edit_event(
         self, 
         inter: disnake.ApplicationCommandInteraction,
@@ -845,6 +931,14 @@ class ScheduleCog(commands.Cog):
         )
     ):
         """Edit an existing event for a specific day"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
         try:
             guild_id = inter.guild.id
             
@@ -877,9 +971,16 @@ class ScheduleCog(commands.Cog):
         name="view_schedule",
         description="View the current weekly schedule (admin only)"
     )
-    @commands.default_member_permissions(manage_guild=True)
     async def view_schedule(self, inter: disnake.ApplicationCommandInteraction):
         """View the current weekly schedule"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
         try:
             guild_id = inter.guild.id
             
@@ -1179,7 +1280,119 @@ class ScheduleCog(commands.Cog):
         embed.set_footer(text=f"Total responses: {total_responses}/{total_members} members")
         
         await inter.response.send_message(embed=embed, ephemeral=True)
-    
+
+    @commands.slash_command(
+        name="force_post_rsvp",
+        description="Manually post today's RSVP if it didn't post automatically (admin only)"
+    )
+    async def force_post_rsvp(self, inter: disnake.ApplicationCommandInteraction):
+        """Manually post today's RSVP if it didn't post automatically"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        # Defer the response to prevent timeout
+        await inter.response.defer(ephemeral=True)
+        
+        try:
+            guild_id = inter.guild.id
+            
+            # Check if today's post already exists
+            today = datetime.now(timezone.utc).date()
+            existing_post = await database.get_daily_post(guild_id, today)
+            
+            if existing_post:
+                await inter.edit_original_message(
+                    "⚠️ Today's RSVP has already been posted. Check the event channel for the existing post."
+                )
+                return
+            
+            # Get guild settings to find the event channel
+            guild_settings = await database.get_guild_settings(guild_id)
+            channel_id = guild_settings.get('event_channel_id') if guild_settings else None
+            
+            if not channel_id:
+                await inter.edit_original_message(
+                    "❌ No event channel has been configured. Please use `/set_event_channel` to set up the event channel first."
+                )
+                return
+            
+            # Get the channel
+            channel = inter.guild.get_channel(channel_id)
+            if not channel:
+                await inter.edit_original_message(
+                    "❌ The configured event channel could not be found. Please reconfigure it using `/set_event_channel`."
+                )
+                return
+            
+            # Check bot permissions in the channel
+            bot_member = inter.guild.get_member(self.bot.user.id)
+            if not bot_member:
+                await inter.edit_original_message(
+                    "❌ Bot member not found in this server. Please check bot permissions."
+                )
+                return
+            
+            # Check if bot has permission to send messages in this channel
+            if not channel.permissions_for(bot_member).send_messages:
+                await inter.edit_original_message(
+                    f"❌ **Bot Permission Error**\n"
+                    f"The bot doesn't have permission to send messages in <#{channel_id}>.\n\n"
+                    f"**Required Permissions:**\n"
+                    f"• Send Messages\n"
+                    f"• Embed Links\n\n"
+                    f"Please ask a server admin to grant these permissions to the bot in that channel."
+                )
+                return
+            
+            # Check if bot has permission to embed links
+            if not channel.permissions_for(bot_member).embed_links:
+                await inter.edit_original_message(
+                    f"❌ **Bot Permission Error**\n"
+                    f"The bot doesn't have permission to embed links in <#{channel_id}>.\n\n"
+                    f"**Required Permissions:**\n"
+                    f"• Send Messages\n"
+                    f"• Embed Links\n\n"
+                    f"Please ask a server admin to grant these permissions to the bot in that channel."
+                )
+                return
+            
+            # Check if current week's schedule is set up
+            is_current_week_setup = await self.check_current_week_setup(guild_id)
+            
+            if not is_current_week_setup:
+                await inter.edit_original_message(
+                    "❌ The current week's schedule has not been set up. Please use `/setup_weekly_schedule` to configure this week's events first."
+                )
+                return
+            
+            # Post today's event
+            await self.post_todays_event(inter.guild, channel)
+            
+            await inter.edit_original_message(
+                f"✅ **RSVP Posted Successfully!**\n"
+                f"Today's RSVP has been manually posted to <#{channel_id}>.\n\n"
+                f"**Event Details:**\n"
+                f"• Check the channel to see the RSVP post\n"
+                f"• Members can now respond with Yes/No/Maybe/Mobile"
+            )
+            
+        except Exception as e:
+            print(f"Error force posting RSVP: {e}")
+            await inter.edit_original_message(
+                f"❌ **Error Posting RSVP**\n"
+                f"An error occurred while trying to post today's RSVP.\n\n"
+                f"**Error:** {str(e)}\n\n"
+                f"Please check:\n"
+                f"• Bot permissions in the event channel\n"
+                f"• Event channel configuration\n"
+                f"• Weekly schedule setup"
+            )
+
     @commands.Cog.listener()
     async def on_modal_submit(self, inter: disnake.ModalInteraction):
         """Handle modal submissions for schedule setup and editing"""
