@@ -173,6 +173,16 @@ Anyone can see who's coming to events:
 | `/list_commands` | See all available commands | Server Admins + Specific User |
 | `/force_sync` | Fix command display issues | Server Admins + Specific User |
 
+## 🩺 Monitoring & Diagnostics
+
+| Command | What It Does |
+|---------|--------------|
+| `/bot_status` | Check the bot's current status, uptime, and connection health |
+| `/monitor_status` | Get detailed monitoring information including memory, CPU, and performance metrics |
+| `/test_connection` | Test the bot's connection to Discord and database |
+
+Mention these commands in troubleshooting and tips sections as ways to check bot health and diagnose issues.
+
 ## 🔧 Special Access
 
 The bot includes a special access system for a specific user ID (300157754012860425) who can use all admin commands regardless of their role in the server. This provides backup access in case of permission issues.

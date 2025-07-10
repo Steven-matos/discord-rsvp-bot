@@ -15,6 +15,9 @@ aiofiles>=23.0.0
 # Timezone handling
 pytz>=2023.3
 
+# System monitoring (for bot monitoring features)
+psutil>=5.9.0
+
 # Development dependencies (optional - uncomment if needed)
 # pytest>=7.0.0
 # pytest-asyncio>=0.21.0

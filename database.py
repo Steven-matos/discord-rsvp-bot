@@ -518,3 +518,78 @@ async def update_day_data(guild_id: int, day: str, data: dict) -> bool:
     except Exception as e:
         print(f"Error updating day data for guild {guild_id}, day {day}: {e}")
         return False
+
+async def get_old_daily_posts(cutoff_date: date) -> List[dict]:
+    """
+    Get all daily posts older than the cutoff date for cleanup.
+    
+    Args:
+        cutoff_date: Date before which posts should be deleted
+    
+    Returns:
+        List of post data dictionaries
+    """
+    try:
+        client = get_supabase_client()
+        
+        result = client.table('daily_posts').select('*').lt('event_date', cutoff_date.isoformat()).execute()
+        
+        if not result.data:
+            return []
+        
+        # Parse event_data JSON for each post
+        for post in result.data:
+            if 'event_data' in post:
+                post['event_data'] = json.loads(post['event_data'])
+        
+        return result.data
+        
+    except Exception as e:
+        print(f"Error getting old daily posts before {cutoff_date}: {e}")
+        return []
+
+async def delete_daily_post(post_id: str) -> bool:
+    """
+    Delete a daily post from the database.
+    This will also cascade delete related RSVP responses and reminder records.
+    
+    Args:
+        post_id: UUID of the daily post to delete
+    
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        client = get_supabase_client()
+        
+        result = client.table('daily_posts').delete().eq('id', post_id).execute()
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error deleting daily post {post_id}: {e}")
+        return False
+
+async def get_all_guilds_with_daily_posts() -> List[int]:
+    """
+    Get all guild IDs that have daily posts in the database.
+    
+    Returns:
+        List of guild IDs
+    """
+    try:
+        client = get_supabase_client()
+        
+        result = client.table('daily_posts').select('guild_id').execute()
+        
+        if not result.data:
+            return []
+        
+        # Extract unique guild IDs
+        guild_ids = list(set(post['guild_id'] for post in result.data))
+        
+        return guild_ids
+        
+    except Exception as e:
+        print(f"Error getting guilds with daily posts: {e}")
+        return []

@@ -289,3 +289,30 @@ Raid Night
 ---
 
 *Need help? Check the main README.md for detailed setup instructions and troubleshooting tips.* 
+
+## 🩺 Monitoring & Diagnostics Commands
+
+### `/bot_status`
+**What it does:** Shows the bot's current status, uptime, number of servers, latency, and reconnection attempts.
+
+**How to use:**
+1. Type `/bot_status`
+2. The bot will display an embed with status and uptime info
+
+### `/monitor_status`
+**What it does:** Shows detailed monitoring information including memory usage, CPU usage, latency, and warnings if any issues are detected.
+
+**How to use:**
+1. Type `/monitor_status`
+2. The bot will display an embed with detailed monitoring and performance info
+
+### `/test_connection`
+**What it does:** Tests the bot's connection to Discord and the database, and reports latency.
+
+**How to use:**
+1. Type `/test_connection`
+2. The bot will display an embed with the results of the connection tests
+
+---
+
+Mention these commands in the troubleshooting section as ways to check bot health and diagnose issues. 

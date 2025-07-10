@@ -172,10 +172,13 @@ class ScheduleCog(commands.Cog):
         self.daily_posting_task.start()
         # Start the reminder checking task
         self.reminder_check_task.start()
+        # Start the cleanup task
+        self.cleanup_old_posts_task.start()
     
     def cog_unload(self):
         self.daily_posting_task.cancel()
         self.reminder_check_task.cancel()
+        self.cleanup_old_posts_task.cancel()
     
     @tasks.loop(minutes=1)  # Check every minute
     async def daily_posting_task(self):
@@ -201,6 +204,76 @@ class ScheduleCog(commands.Cog):
     
     @reminder_check_task.before_loop
     async def before_reminder_check(self):
+        await self.bot.wait_until_ready()
+    
+    @tasks.loop(hours=24)  # Run once per day
+    async def cleanup_old_posts_task(self):
+        """Clean up old daily posts to keep channels clean"""
+        try:
+            # Get yesterday's date as cutoff (delete posts older than yesterday)
+            yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
+            
+            # Get all old posts
+            old_posts = await database.get_old_daily_posts(yesterday)
+            
+            if not old_posts:
+                return  # No old posts to clean up
+            
+            deleted_count = 0
+            failed_count = 0
+            
+            for post_data in old_posts:
+                try:
+                    guild_id = post_data['guild_id']
+                    channel_id = post_data['channel_id']
+                    message_id = post_data['message_id']
+                    post_id = post_data['id']
+                    
+                    # Get the guild and channel
+                    guild = self.bot.get_guild(guild_id)
+                    if not guild:
+                        # Guild not found, skip this post
+                        print(f"Guild {guild_id} not found, skipping cleanup")
+                        continue
+                    
+                    channel = guild.get_channel(channel_id)
+                    if not channel:
+                        # Channel not found, skip this post
+                        print(f"Channel {channel_id} not found in guild {guild_id}, skipping cleanup")
+                        continue
+                    
+                    # Try to delete the message from Discord only
+                    try:
+                        message = await channel.fetch_message(message_id)
+                        await message.delete()
+                        print(f"Deleted old event message {message_id} from guild {guild_id}")
+                        deleted_count += 1
+                    except disnake.NotFound:
+                        # Message already deleted or not found
+                        print(f"Message {message_id} not found in guild {guild_id}, already cleaned up")
+                        deleted_count += 1
+                    except disnake.Forbidden:
+                        # Bot doesn't have permission to delete the message
+                        print(f"Bot doesn't have permission to delete message {message_id} in guild {guild_id}")
+                        failed_count += 1
+                    except Exception as e:
+                        print(f"Error deleting message {message_id} in guild {guild_id}: {e}")
+                        failed_count += 1
+                    
+                    # Note: We do NOT delete from database to preserve RSVP data
+                    
+                except Exception as e:
+                    print(f"Error cleaning up post {post_data.get('id', 'unknown')}: {e}")
+                    failed_count += 1
+            
+            if deleted_count > 0 or failed_count > 0:
+                print(f"Cleanup completed: {deleted_count} Discord messages deleted, {failed_count} failed")
+                
+        except Exception as e:
+            print(f"Error in cleanup_old_posts_task: {e}")
+    
+    @cleanup_old_posts_task.before_loop
+    async def before_cleanup_old_posts(self):
         await self.bot.wait_until_ready()
     
     async def post_daily_events(self):
@@ -605,7 +678,7 @@ class ScheduleCog(commands.Cog):
             "",
             "**📋 `/view_schedule`** - View the current weekly schedule to see all events for each day of the week.",
             "",
-            "**✏️ `/edit_event`** - Edit an existing event for any day of the week. Change the event name, outfit, or vehicle.",
+            "**✏️ `/edit_event`** - Add or edit an event for any day of the week. Create new events or change existing event names, outfits, or vehicles.",
             "",
             "**📢 `/set_event_channel`** - Choose which channel the bot will post daily events to. This is where members will see event announcements and RSVP buttons.",
             "",
@@ -623,7 +696,14 @@ class ScheduleCog(commands.Cog):
             "",
             "**🔄 `/force_sync`** - Refresh the bot's commands in Discord. Use this if commands aren't appearing properly.",
             "",
-            "**📋 `/list_commands`** - Show this list of all available commands with descriptions."
+            "**📋 `/list_commands`** - Show this list of all available commands with descriptions.",
+            "",
+            "**🧹 `/cleanup_old_posts`** - Manually clean up old event posts from Discord channels (keeps RSVP data).",
+            "",
+            "__**Monitoring & Diagnostics**__",
+            "**🤖 `/bot_status`** - Check the bot's current status, uptime, and connection health.",
+            "**🔍 `/monitor_status`** - Get detailed monitoring information including memory, CPU, and performance metrics.",
+            "**🔧 `/test_connection`** - Test the bot's connection to Discord and database."
         ]
         
         embed = disnake.Embed(
@@ -925,17 +1005,17 @@ class ScheduleCog(commands.Cog):
     
     @commands.slash_command(
         name="edit_event",
-        description="Edit an existing event for a specific day (admin only)"
+        description="Add or edit an event for a specific day (admin only)"
     )
     async def edit_event(
         self, 
         inter: disnake.ApplicationCommandInteraction,
         day: str = commands.Param(
-            description="Day of the week to edit",
+            description="Day of the week to add or edit",
             choices=["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
         )
     ):
-        """Edit an existing event for a specific day"""
+        """Add or edit an event for a specific day"""
         # Check permissions
         if not check_admin_or_specific_user(inter):
             await inter.response.send_message(
@@ -950,18 +1030,12 @@ class ScheduleCog(commands.Cog):
             # Get current schedule
             schedule = await database.get_guild_schedule(guild_id)
             
-            if not schedule or day not in schedule:
-                await inter.response.send_message(
-                    f"❌ **No Event Found**\n"
-                    f"No event is currently scheduled for {day.capitalize()}.",
-                    ephemeral=True
-                )
-                return
+            # Get current event data if it exists
+            current_data = None
+            if schedule and day in schedule:
+                current_data = schedule[day]
             
-            # Get current event data
-            current_data = schedule[day]
-            
-            # Create and show edit modal
+            # Create and show edit modal (will work for both new and existing events)
             modal = EditEventModal(day, guild_id, current_data)
             await inter.response.send_modal(modal)
             
@@ -980,24 +1054,26 @@ class ScheduleCog(commands.Cog):
         """View the current weekly schedule"""
         # Check permissions
         if not check_admin_or_specific_user(inter):
-            await inter.response.send_message(
-                "❌ You don't have permission to use this command.",
-                ephemeral=True
+            await inter.response.defer(ephemeral=True)
+            await inter.edit_original_response(
+                content="❌ You don't have permission to use this command."
             )
             return
         
         try:
+            await inter.response.defer(ephemeral=True)
             guild_id = inter.guild.id
             
             # Get current schedule
             schedule = await database.get_guild_schedule(guild_id)
             
             if not schedule:
-                await inter.response.send_message(
-                    "❌ **No Schedule Found**\n"
-                    "No weekly schedule has been set up for this server yet.\n"
-                    "Use `/setup_weekly_schedule` to create one.",
-                    ephemeral=True
+                await inter.edit_original_response(
+                    content=(
+                        "❌ **No Schedule Found**\n"
+                        "No weekly schedule has been set up for this server yet.\n"
+                        "Use `/setup_weekly_schedule` to create one."
+                    )
                 )
                 return
             
@@ -1027,15 +1103,16 @@ class ScheduleCog(commands.Cog):
                         inline=True
                     )
             
-            embed.set_footer(text="Use /edit_event to modify any day's event")
+            embed.set_footer(text="Use /edit_event to add or modify any day's event")
             
-            await inter.response.send_message(embed=embed, ephemeral=True)
+            await inter.edit_original_response(embed=embed)
             
         except Exception as e:
-            await inter.response.send_message(
-                f"❌ **Error Viewing Schedule**\n"
-                f"An error occurred: {str(e)}",
-                ephemeral=True
+            await inter.edit_original_response(
+                content=(
+                    f"❌ **Error Viewing Schedule**\n"
+                    f"An error occurred: {str(e)}"
+                )
             )
     
     @commands.slash_command(
@@ -1398,6 +1475,104 @@ class ScheduleCog(commands.Cog):
                 f"• Weekly schedule setup"
             )
 
+    @commands.slash_command(
+        name="cleanup_old_posts",
+        description="Manually clean up old event posts from Discord channels (keeps RSVP data) (admin only)"
+    )
+    async def cleanup_old_posts(self, inter: disnake.ApplicationCommandInteraction):
+        """Manually clean up old event posts from Discord channels"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        # Defer the response to prevent timeout
+        await inter.response.defer(ephemeral=True)
+        
+        try:
+            guild_id = inter.guild.id
+            
+            # Get yesterday's date as cutoff (delete posts older than yesterday)
+            yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
+            
+            # Get all old posts for this guild
+            old_posts = await database.get_old_daily_posts(yesterday)
+            guild_old_posts = [post for post in old_posts if post['guild_id'] == guild_id]
+            
+            if not guild_old_posts:
+                await inter.edit_original_message(
+                    "✅ **No Old Posts Found**\n"
+                    f"No event posts older than {yesterday.strftime('%B %d, %Y')} were found to clean up."
+                )
+                return
+            
+            deleted_count = 0
+            failed_count = 0
+            
+            for post_data in guild_old_posts:
+                try:
+                    channel_id = post_data['channel_id']
+                    message_id = post_data['message_id']
+                    event_date = post_data['event_date']
+                    
+                    # Get the channel
+                    channel = inter.guild.get_channel(channel_id)
+                    if not channel:
+                        print(f"Channel {channel_id} not found in guild {guild_id}, skipping cleanup")
+                        continue
+                    
+                    # Try to delete the message from Discord only
+                    try:
+                        message = await channel.fetch_message(message_id)
+                        await message.delete()
+                        print(f"Deleted old event message {message_id} from guild {guild_id}")
+                        deleted_count += 1
+                    except disnake.NotFound:
+                        # Message already deleted or not found
+                        print(f"Message {message_id} not found in guild {guild_id}, already cleaned up")
+                        deleted_count += 1
+                    except disnake.Forbidden:
+                        # Bot doesn't have permission to delete the message
+                        print(f"Bot doesn't have permission to delete message {message_id} in guild {guild_id}")
+                        failed_count += 1
+                    except Exception as e:
+                        print(f"Error deleting message {message_id} in guild {guild_id}: {e}")
+                        failed_count += 1
+                    
+                    # Note: We do NOT delete from database to preserve RSVP data
+                    
+                except Exception as e:
+                    print(f"Error cleaning up post {post_data.get('id', 'unknown')}: {e}")
+                    failed_count += 1
+            
+            # Create response message
+            if deleted_count > 0:
+                success_message = f"✅ **Cleanup Complete!**\n\n"
+                success_message += f"**Successfully deleted:** {deleted_count} old event posts\n"
+                if failed_count > 0:
+                    success_message += f"**Failed to delete:** {failed_count} posts (missing permissions or already deleted)\n"
+                success_message += f"\n**Note:** RSVP data has been preserved in the database for tracking purposes."
+            else:
+                success_message = f"⚠️ **Cleanup Complete**\n\n"
+                success_message += f"No messages were deleted. This could be due to:\n"
+                success_message += f"• Bot lacks permission to delete messages\n"
+                success_message += f"• Messages were already deleted\n"
+                success_message += f"• Messages are too old for Discord to access\n\n"
+                success_message += f"**Failed attempts:** {failed_count}"
+            
+            await inter.edit_original_message(success_message)
+            
+        except Exception as e:
+            print(f"Error in manual cleanup: {e}")
+            await inter.edit_original_message(
+                f"❌ **Error During Cleanup**\n"
+                f"An error occurred while trying to clean up old posts.\n\n"
+                f"**Error:** {str(e)}"
+            )
+
     @commands.Cog.listener()
     async def on_modal_submit(self, inter: disnake.ModalInteraction):
         """Handle modal submissions for schedule setup and editing"""
@@ -1427,24 +1602,36 @@ class ScheduleCog(commands.Cog):
             }
             
             if is_edit:
-                # Handle edit modal
-                success = await database.update_day_data(guild_id, day, day_data)
+                # Handle edit modal - check if event exists to determine if we're creating or updating
+                schedule = await database.get_guild_schedule(guild_id)
+                event_exists = schedule and day in schedule
+                
+                if event_exists:
+                    # Update existing event
+                    success = await database.update_day_data(guild_id, day, day_data)
+                    action_text = "updated"
+                    title = "✅ Event Updated Successfully"
+                else:
+                    # Create new event
+                    success = await database.save_day_data(guild_id, day, day_data)
+                    action_text = "created"
+                    title = "✅ Event Created Successfully"
                 
                 if success:
                     embed = disnake.Embed(
-                        title="✅ Event Updated Successfully",
-                        description=f"**{day.capitalize()}** event has been updated.",
+                        title=title,
+                        description=f"**{day.capitalize()}** event has been {action_text}.",
                         color=disnake.Color.green()
                     )
                     embed.add_field(name="Event", value=event_name, inline=True)
                     embed.add_field(name="Outfit", value=outfit, inline=True)
                     embed.add_field(name="Vehicle", value=vehicle, inline=True)
-                    embed.set_footer(text="The updated event will be used for future posts")
+                    embed.set_footer(text="The event will be used for future posts")
                     
                     await inter.response.send_message(embed=embed, ephemeral=True)
                 else:
                     await inter.response.send_message(
-                        f"❌ Failed to update {day.capitalize()} event. Please try again.",
+                        f"❌ Failed to {action_text} {day.capitalize()} event. Please try again.",
                         ephemeral=True
                     )
                 return
