@@ -317,6 +317,9 @@ class ScheduleCog(commands.Cog):
             await self.notify_admins_no_schedule(guild, channel)
             return
         
+        # Delete any existing posts from today before posting new ones
+        await self.delete_todays_existing_posts(guild_id, channel)
+        
         # Get schedule for this guild
         schedule = await database.get_guild_schedule(guild_id)
         
@@ -427,6 +430,45 @@ class ScheduleCog(commands.Cog):
             print(f"Error posting event to channel {channel.id} in guild {guild_id}: {e}")
             return
     
+    async def delete_todays_existing_posts(self, guild_id: int, channel: disnake.TextChannel):
+        """Delete any existing bot posts from today before posting new ones"""
+        try:
+            today = datetime.now(timezone.utc).date()
+            
+            # Get today's existing post from database
+            existing_post = await database.get_daily_post(guild_id, today)
+            
+            if not existing_post:
+                return  # No existing post to delete
+            
+            # Check if bot has permission to delete messages
+            bot_member = channel.guild.get_member(self.bot.user.id)
+            if not bot_member or not channel.permissions_for(bot_member).manage_messages:
+                print(f"Bot doesn't have permission to delete messages in channel {channel.id} for guild {guild_id}")
+                return
+            
+            # Try to delete the existing message from Discord
+            try:
+                message_id = existing_post['message_id']
+                message = await channel.fetch_message(message_id)
+                await message.delete()
+                print(f"Deleted existing bot post {message_id} from channel {channel.id} in guild {guild_id}")
+            except disnake.NotFound:
+                # Message already deleted or not found
+                print(f"Existing bot post {message_id} already deleted or not found in guild {guild_id}")
+            except disnake.Forbidden:
+                # Bot doesn't have permission to delete the message
+                print(f"Bot doesn't have permission to delete message {message_id} in guild {guild_id}")
+            except Exception as e:
+                print(f"Error deleting existing bot post {message_id} in guild {guild_id}: {e}")
+            
+            # Delete the post from the database as well so it doesn't interfere with new posts
+            await database.delete_daily_post(existing_post['id'])
+            print(f"Deleted existing bot post data from database for guild {guild_id}")
+            
+        except Exception as e:
+            print(f"Error deleting today's existing posts for guild {guild_id}: {e}")
+
     async def check_current_week_setup(self, guild_id: int) -> bool:
         """Check if the current week's schedule has been set up"""
         try:
@@ -674,36 +716,44 @@ class ScheduleCog(commands.Cog):
             return
         
         commands_list = [
-            "**📅 `/setup_weekly_schedule`** - Create your weekly event schedule. This walks you through setting up events for each day of the week with event names, outfits, and vehicles.",
+            "__**🚀 Getting Started**__",
+            "**📅 `/setup_weekly_schedule`** - Plan your week! Tell me what events you want (like Monday raids, Tuesday training, etc.) and I'll post them automatically every day.",
             "",
-            "**📋 `/view_schedule`** - View the current weekly schedule to see all events for each day of the week.",
+            "**📢 `/set_event_channel`** - Pick which channel I should post events in. This is where your team will see daily announcements and click buttons to say if they're coming.",
             "",
-            "**✏️ `/edit_event`** - Add or edit an event for any day of the week. Create new events or change existing event names, outfits, or vehicles.",
+            "**⏰ `/set_event_time`** - What time do your events usually start? This helps me send reminders at the right times.",
             "",
-            "**📢 `/set_event_channel`** - Choose which channel the bot will post daily events to. This is where members will see event announcements and RSVP buttons.",
+            "__**📋 Managing Your Events**__",
+            "**📋 `/view_schedule`** - Show me this week's event plan. See what's happening each day at a glance.",
             "",
-            "**⏰ `/set_event_time`** - Set what time your events start each day (in Eastern Time). This affects when reminders are sent.",
+            "**✏️ `/edit_event`** - Change or add events for any day. Maybe Monday changed from 'Raids' to 'PvP Night'? I've got you covered!",
             "",
-            "**🔔 `/configure_reminders`** - Control when reminder messages are sent. You can enable/disable reminders at 4 PM, 1 hour before, and 15 minutes before events.",
+            "**🔔 `/configure_reminders`** - Want reminders? I can ping everyone about tonight's event, or remind them an hour before it starts.",
             "",
-            "**🔔 `/set_admin_channel`** - Set the channel for admin notifications. This is where alerts about schedule issues (like 'schedule not set up') will be sent.",
+            "__**👥 See Who's Coming**__",
+            "**👥 `/view_rsvps`** - Who's joining today's event? See the list of people coming, maybe coming, or can't make it.",
             "",
-            "**👥 `/view_rsvps`** - See who has RSVP'd for today's event. Shows who's coming, who's not, who's maybe, and who's on mobile.",
+            "**📊 `/view_yesterday_rsvps`** - Check who showed up yesterday. Great for seeing attendance trends!",
             "",
-            "**📊 `/view_yesterday_rsvps`** - Check RSVP responses from yesterday's event. Useful for tracking attendance patterns.",
+            "__**🛠️ Troubleshooting & Fixes**__",
+            "**🚀 `/force_post_rsvp`** - Didn't get today's event post? Use this to make me post it right now.",
             "",
-            "**🚀 `/force_post_rsvp`** - Manually post today's RSVP if it didn't post automatically. Useful for troubleshooting or late posts.",
+            "**🗑️ `/delete_message`** - Remove any unwanted message by copying its ID. Useful for cleaning up mistakes.",
             "",
-            "**🔄 `/force_sync`** - Refresh the bot's commands in Discord. Use this if commands aren't appearing properly.",
+            "**🔄 `/force_sync`** - Commands not showing up when you type '/'? This refreshes everything.",
             "",
-            "**📋 `/list_commands`** - Show this list of all available commands with descriptions.",
+            "**🧹 `/cleanup_old_posts`** - Remove old event posts to keep your channel tidy (but keeps all the RSVP records).",
             "",
-            "**🧹 `/cleanup_old_posts`** - Manually clean up old event posts from Discord channels (keeps RSVP data).",
+            "**🔔 `/set_admin_channel`** - Choose where I send important alerts (like 'Hey, you forgot to set up this week's schedule!').",
             "",
-            "__**Monitoring & Diagnostics**__",
-            "**🤖 `/bot_status`** - Check the bot's current status, uptime, and connection health.",
-            "**🔍 `/monitor_status`** - Get detailed monitoring information including memory, CPU, and performance metrics.",
-            "**🔧 `/test_connection`** - Test the bot's connection to Discord and database."
+            "__**🔧 Advanced Options**__",
+            "**📋 `/list_commands`** - Show this help menu again anytime.",
+            "",
+            "**🤖 `/bot_status`** - Is the bot working properly? Check here if things seem slow.",
+            "",
+            "**🔍 `/monitor_status`** - Detailed bot health info (for tech-savvy users).",
+            "",
+            "**🔧 `/test_connection`** - Test if I can connect to Discord and my database properly."
         ]
         
         embed = disnake.Embed(
@@ -1377,24 +1427,56 @@ class ScheduleCog(commands.Cog):
             )
             return
         
-        # Defer the response to prevent timeout
-        await inter.response.defer(ephemeral=True)
+        # Defer the response immediately to prevent timeout
+        try:
+            await inter.response.defer(ephemeral=True)
+        except disnake.errors.NotFound:
+            # Interaction has already expired, can't proceed
+            print(f"Interaction expired for force_post_rsvp in guild {inter.guild.id}")
+            return
+        except Exception as e:
+            print(f"Error deferring interaction for force_post_rsvp: {e}")
+            return
         
         try:
             guild_id = inter.guild.id
-            
-            # Check if today's post already exists
             today = datetime.now(timezone.utc).date()
-            existing_post = await database.get_daily_post(guild_id, today)
             
-            if existing_post:
-                await inter.edit_original_message(
-                    "⚠️ Today's RSVP has already been posted. Check the event channel for the existing post."
-                )
-                return
+            # Send initial status update
+            try:
+                await inter.edit_original_message("🔄 **Checking current setup...**")
+            except:
+                pass  # If this fails, continue anyway
             
-            # Get guild settings to find the event channel
-            guild_settings = await database.get_guild_settings(guild_id)
+            # Run database queries in parallel for speed
+            import asyncio
+            existing_post_task = database.get_daily_post(guild_id, today)
+            guild_settings_task = database.get_guild_settings(guild_id)
+            current_week_task = self.check_current_week_setup(guild_id)
+            
+            # Wait for all queries to complete
+            existing_post, guild_settings, is_current_week_setup = await asyncio.gather(
+                existing_post_task,
+                guild_settings_task, 
+                current_week_task,
+                return_exceptions=True
+            )
+            
+            # Handle any exceptions from the parallel queries
+            if isinstance(existing_post, Exception):
+                existing_post = None
+            if isinstance(guild_settings, Exception):
+                guild_settings = None
+            if isinstance(is_current_week_setup, Exception):
+                is_current_week_setup = False
+            
+            # Update status
+            try:
+                await inter.edit_original_message("🔄 **Validating configuration...**")
+            except:
+                pass
+            
+            # Get event channel
             channel_id = guild_settings.get('event_channel_id') if guild_settings else None
             
             if not channel_id:
@@ -1443,36 +1525,162 @@ class ScheduleCog(commands.Cog):
                 )
                 return
             
-            # Check if current week's schedule is set up
-            is_current_week_setup = await self.check_current_week_setup(guild_id)
-            
+            # Check if current week's schedule is set up (already done in parallel above)
             if not is_current_week_setup:
                 await inter.edit_original_message(
                     "❌ The current week's schedule has not been set up. Please use `/setup_weekly_schedule` to configure this week's events first."
                 )
                 return
             
+            # Update status about existing post
+            if existing_post:
+                try:
+                    await inter.edit_original_message("🔄 **Removing existing post and creating new one...**")
+                except:
+                    pass
+            else:
+                try:
+                    await inter.edit_original_message("🔄 **Creating today's RSVP post...**")
+                except:
+                    pass
+            
             # Post today's event
             await self.post_todays_event(inter.guild, channel)
             
-            await inter.edit_original_message(
-                f"✅ **RSVP Posted Successfully!**\n"
-                f"Today's RSVP has been manually posted to <#{channel_id}>.\n\n"
-                f"**Event Details:**\n"
-                f"• Check the channel to see the RSVP post\n"
-                f"• Members can now respond with Yes/No/Maybe/Mobile"
-            )
+            try:
+                await inter.edit_original_message(
+                    f"✅ **RSVP Posted Successfully!**\n"
+                    f"Today's RSVP has been manually posted to <#{channel_id}>.\n\n"
+                    f"**Event Details:**\n"
+                    f"• Check the channel to see the RSVP post\n"
+                    f"• Members can now respond with Yes/No/Maybe/Mobile"
+                )
+            except disnake.errors.NotFound:
+                # Interaction has expired, but command was successful
+                print(f"Successfully posted RSVP but could not edit response in guild {inter.guild.id}: interaction expired")
+            except Exception as edit_error:
+                print(f"Error editing successful response for force_post_rsvp: {edit_error}")
             
         except Exception as e:
             print(f"Error force posting RSVP: {e}")
+            try:
+                await inter.edit_original_message(
+                    f"❌ **Error Posting RSVP**\n"
+                    f"An error occurred while trying to post today's RSVP.\n\n"
+                    f"**Error:** {str(e)}\n\n"
+                    f"Please check:\n"
+                    f"• Bot permissions in the event channel\n"
+                    f"• Event channel configuration\n"
+                    f"• Weekly schedule setup"
+                )
+            except disnake.errors.NotFound:
+                # Interaction has expired, can't edit response
+                print(f"Could not edit response for force_post_rsvp error in guild {inter.guild.id}: interaction expired")
+            except Exception as edit_error:
+                print(f"Error editing response for force_post_rsvp: {edit_error}")
+
+    @commands.slash_command(
+        name="delete_message",
+        description="Delete a specific message by ID (admin only)"
+    )
+    async def delete_message(
+        self, 
+        inter: disnake.ApplicationCommandInteraction,
+        message_id: str = commands.Param(description="The ID of the message to delete"),
+        channel: disnake.TextChannel = commands.Param(description="Channel where the message is located", default=None)
+    ):
+        """Delete a specific message by ID"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        # Defer the response immediately to prevent timeout
+        try:
+            await inter.response.defer(ephemeral=True)
+        except disnake.errors.NotFound:
+            # Interaction has already expired, can't proceed
+            print(f"Interaction expired for delete_message in guild {inter.guild.id}")
+            return
+        except Exception as e:
+            print(f"Error deferring interaction for delete_message: {e}")
+            return
+        
+        try:
+            # Convert message_id to int
+            try:
+                message_id_int = int(message_id)
+            except ValueError:
+                await inter.edit_original_message(
+                    "❌ **Invalid Message ID**\n"
+                    "Please provide a valid numeric message ID."
+                )
+                return
+            
+            # Use the specified channel or default to the current channel
+            target_channel = channel if channel else inter.channel
+            
+            # Check if bot has permission to delete messages in the target channel
+            bot_member = inter.guild.get_member(self.bot.user.id)
+            if not bot_member or not target_channel.permissions_for(bot_member).manage_messages:
+                await inter.edit_original_message(
+                    f"❌ **Bot Permission Error**\n"
+                    f"The bot doesn't have permission to delete messages in {target_channel.mention}.\n\n"
+                    f"**Required Permission:**\n"
+                    f"• Manage Messages\n\n"
+                    f"Please ask a server admin to grant this permission to the bot in that channel."
+                )
+                return
+            
+            # Try to fetch and delete the message
+            try:
+                message = await target_channel.fetch_message(message_id_int)
+                await message.delete()
+                
+                await inter.edit_original_message(
+                    f"✅ **Message Deleted Successfully!**\n"
+                    f"Message ID: `{message_id}`\n"
+                    f"Channel: {target_channel.mention}\n"
+                    f"Author: {message.author.mention if message.author else 'Unknown'}\n"
+                    f"Content preview: {message.content[:100]}{'...' if len(message.content) > 100 else ''}"
+                )
+                
+            except disnake.NotFound:
+                await inter.edit_original_message(
+                    f"❌ **Message Not Found**\n"
+                    f"No message with ID `{message_id}` was found in {target_channel.mention}.\n\n"
+                    f"**Possible reasons:**\n"
+                    f"• The message has already been deleted\n"
+                    f"• The message is in a different channel\n"
+                    f"• The message ID is incorrect"
+                )
+                
+            except disnake.Forbidden:
+                await inter.edit_original_message(
+                    f"❌ **Permission Denied**\n"
+                    f"The bot doesn't have permission to delete that message.\n\n"
+                    f"**This could be because:**\n"
+                    f"• The message is from a user with higher permissions\n"
+                    f"• The message is system-generated\n"
+                    f"• The bot's role is lower than the message author's role"
+                )
+                
+            except Exception as e:
+                await inter.edit_original_message(
+                    f"❌ **Error Deleting Message**\n"
+                    f"An unexpected error occurred: {str(e)}\n\n"
+                    f"**Message ID:** `{message_id}`\n"
+                    f"**Channel:** {target_channel.mention}"
+                )
+                
+        except Exception as e:
+            print(f"Error in delete_message command: {e}")
             await inter.edit_original_message(
-                f"❌ **Error Posting RSVP**\n"
-                f"An error occurred while trying to post today's RSVP.\n\n"
-                f"**Error:** {str(e)}\n\n"
-                f"Please check:\n"
-                f"• Bot permissions in the event channel\n"
-                f"• Event channel configuration\n"
-                f"• Weekly schedule setup"
+                f"❌ **Command Error**\n"
+                f"An error occurred while processing the command: {str(e)}"
             )
 
     @commands.slash_command(
@@ -1489,8 +1697,16 @@ class ScheduleCog(commands.Cog):
             )
             return
         
-        # Defer the response to prevent timeout
-        await inter.response.defer(ephemeral=True)
+        # Defer the response immediately to prevent timeout
+        try:
+            await inter.response.defer(ephemeral=True)
+        except disnake.errors.NotFound:
+            # Interaction has already expired, can't proceed
+            print(f"Interaction expired for cleanup_old_posts in guild {inter.guild.id}")
+            return
+        except Exception as e:
+            print(f"Error deferring interaction for cleanup_old_posts: {e}")
+            return
         
         try:
             guild_id = inter.guild.id

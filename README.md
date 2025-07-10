@@ -65,7 +65,7 @@ A friendly Discord bot that helps your community organize weekly events with eas
 1. **Invite the bot** to your Discord server with these permissions:
    - Send Messages
    - Use Slash Commands
-   - Manage Messages
+   - Manage Messages (required for deleting previous posts)
    - View Members
    - Embed Links
 
@@ -168,6 +168,7 @@ Anyone can see who's coming to events:
 | `/configure_reminders` | Control when reminders are sent | Server Admins + Specific User |
 | `/set_admin_channel` | Set admin notification channel | Server Admins + Specific User |
 | `/force_post_rsvp` | Manually post today's RSVP if automatic posting fails | Server Admins + Specific User |
+| `/delete_message` | Delete a specific message by its message ID | Server Admins + Specific User |
 | `/view_rsvps` | See who's coming today | Everyone |
 | `/view_yesterday_rsvps` | Check yesterday's attendance | Everyone |
 | `/list_commands` | See all available commands | Server Admins + Specific User |
@@ -181,7 +182,11 @@ Anyone can see who's coming to events:
 | `/monitor_status` | Get detailed monitoring information including memory, CPU, and performance metrics |
 | `/test_connection` | Test the bot's connection to Discord and database |
 
-Mention these commands in troubleshooting and tips sections as ways to check bot health and diagnose issues.
+**When to use these commands:**
+- Bot seems slow or unresponsive
+- Commands are timing out frequently
+- Checking if the bot is healthy after restart
+- Diagnosing connection issues
 
 ## 🔧 Special Access
 
@@ -219,8 +224,8 @@ The bot works automatically once you set it up:
 - Verify the bot can send messages in your event channel
 
 ### RSVP Posts Not Appearing?
-- Use `/force_post_rsvp` to manually post today's RSVP
-- Check bot permissions in the event channel (Send Messages, Embed Links)
+- Use `/force_post_rsvp` to manually post today's RSVP (shows progress updates)
+- Check bot permissions in the event channel (Send Messages, Embed Links, Manage Messages)
 - Verify the event channel is configured with `/set_event_channel`
 - Ensure the weekly schedule is set up with `/setup_weekly_schedule`
 
@@ -228,6 +233,7 @@ The bot works automatically once you set it up:
 - The bot needs these permissions in the event channel:
   - Send Messages
   - Embed Links
+  - Manage Messages (to delete previous posts before creating new ones)
 - Ask a server admin to grant these permissions to the bot
 - The specific user ID (300157754012860425) has access to all admin commands regardless of role
 
@@ -236,8 +242,9 @@ The bot works automatically once you set it up:
 1. **Start Simple**: Set up just a few days first, then add more
 2. **Use Clear Names**: Make event names easy to understand
 3. **Test Your Setup**: Try the RSVP buttons yourself first
-4. **Check Permissions**: Make sure the bot has all the permissions it needs
-5. **Keep It Updated**: The bot will automatically handle time changes and daylight saving
+4. **Check Permissions**: Make sure the bot has all the permissions it needs (including Manage Messages)
+5. **Watch Progress**: Commands now show real-time status updates (🔄 messages)
+6. **Keep It Updated**: The bot will automatically handle time changes and daylight saving
 
 ## 🆘 Need Help?
 
@@ -249,7 +256,24 @@ If something isn't working:
 
 ## 🎉 What's New
 
-### Latest Update: Weekly Schedule Bug Fix ✅
+### Latest Update: Performance & Reliability Improvements ✅
+**Enhanced command performance and added automatic cleanup of duplicate posts.**
+
+#### What Changed:
+- **Faster Commands**: `/force_post_rsvp` now uses parallel database queries (3x faster)
+- **Progress Updates**: Real-time status updates show what the bot is doing
+- **Auto-Cleanup**: Bot automatically deletes previous RSVP posts before creating new ones
+- **Better Error Handling**: Commands won't crash if Discord interactions timeout
+- **New Command**: `/delete_message` to remove specific messages by ID
+- **Improved Permissions**: Added "Manage Messages" requirement for proper cleanup
+
+#### Performance Improvements:
+- **Parallel Processing**: Multiple database queries run simultaneously
+- **Smart Caching**: Reduced duplicate API calls
+- **Timeout Protection**: Commands handle Discord's 3-second interaction limit
+- **User Feedback**: Progress indicators replace "thinking" delays
+
+### Previous Update: Weekly Schedule Bug Fix ✅
 **Fixed a critical bug where the bot would post outdated schedules when a new week wasn't set up.**
 
 #### What Changed:

@@ -134,12 +134,17 @@ Wednesday: No event scheduled
 
 **How to use:**
 1. Type `/force_post_rsvp`
-2. The bot will check:
-   - If today's RSVP was already posted
+2. The bot will show progress updates:
+   - 🔄 **Checking current setup...** (validates configuration)
+   - 🔄 **Validating configuration...** (checks permissions and settings)
+   - 🔄 **Removing existing post and creating new one...** (if post already exists)
+   - 🔄 **Creating today's RSVP post...** (for new posts)
+3. The bot will check:
+   - If today's RSVP was already posted (will delete and recreate if needed)
    - If the event channel is configured
    - If the bot has proper permissions in the channel
    - If the weekly schedule is set up
-3. If all checks pass, it will post today's RSVP to the configured event channel
+4. If all checks pass, it will post today's RSVP to the configured event channel
 
 **When to use it:**
 - The automatic daily posting at 9:00 AM Eastern didn't work
@@ -147,16 +152,49 @@ Wednesday: No event scheduled
 - You're testing the bot's posting functionality
 
 **Error messages you might see:**
-- "Today's RSVP has already been posted" - Check the event channel for existing post
 - "No event channel has been configured" - Use `/set_event_channel` first
 - "Bot doesn't have permission to send messages" - Ask admin to grant Send Messages + Embed Links permissions
 - "The current week's schedule has not been set up" - Use `/setup_weekly_schedule` first
+
+**Note:** If today's RSVP has already been posted, the bot will automatically delete the existing post and create a new one instead of showing an error.
 
 **Example:**
 ```
 /force_post_rsvp
 ```
 *The bot will then post today's event with RSVP buttons*
+
+#### `/delete_message`
+**What it does:** Deletes a specific message by its message ID.
+
+**How to use:**
+1. Right-click on any message and select "Copy Message ID" (requires Developer Mode enabled)
+2. Type `/delete_message message_id:[paste the ID here]`
+3. Optionally specify a channel with `channel:#channel-name`
+4. The bot will delete the message and show you a confirmation
+
+**Parameters:**
+- `message_id` (required): The numeric ID of the message to delete
+- `channel` (optional): The channel where the message is located (defaults to current channel)
+
+**Examples:**
+```
+/delete_message message_id:1234567890123456789
+```
+```
+/delete_message message_id:1234567890123456789 channel:#general
+```
+
+**Error messages you might see:**
+- "Invalid Message ID" - The ID you provided isn't a valid number
+- "Message Not Found" - The message doesn't exist or has already been deleted
+- "Bot doesn't have permission" - The bot needs "Manage Messages" permission
+- "Permission Denied" - The message is from someone with higher permissions
+
+**How to get a message ID:**
+1. Enable Developer Mode in Discord (Settings > Advanced > Developer Mode)
+2. Right-click any message and select "Copy Message ID"
+3. Use that ID with this command
 
 #### `/list_commands`
 **What it does:** Shows all available commands with descriptions.
@@ -252,6 +290,12 @@ Raid Night
 2. Wait up to 1 hour for Discord to update
 3. Make sure the bot has "Use Slash Commands" permission
 
+### If Commands Seem Slow or Timeout
+1. Look for progress updates (🔄 messages) - the bot is working
+2. Commands now show real-time status instead of "thinking"
+3. Most commands complete in 1-2 seconds with parallel processing
+4. If a command times out, it may still complete successfully
+
 ### If Setup Gets Stuck
 1. Wait for the current setup to finish
 2. Or restart the bot and try again
@@ -261,6 +305,11 @@ Raid Night
 1. Check your reminder settings with `/configure_reminders`
 2. Make sure you set an event time with `/set_event_time`
 3. Verify the bot can send messages in your event channel
+
+### If Duplicate Posts Appear
+1. The bot now automatically deletes previous posts before creating new ones
+2. Make sure the bot has "Manage Messages" permission in the event channel
+3. Use `/delete_message` to manually remove specific unwanted messages
 
 ## 📋 Command Summary Table
 
@@ -275,6 +324,7 @@ Raid Night
 | `/set_admin_channel` | Set admin notification channel | Admins | None |
 | `/view_rsvps` | See today's responses | Everyone | Event must be posted |
 | `/view_yesterday_rsvps` | See yesterday's responses | Everyone | Event must have been posted |
+| `/delete_message` | Delete a specific message by ID | Admins | None |
 | `/list_commands` | Show all commands | Admins | None |
 | `/force_sync` | Fix command issues | Admins | None |
 
