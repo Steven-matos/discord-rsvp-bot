@@ -7,16 +7,17 @@ import calendar
 import pytz
 import functools
 
-# Specific user ID that has access to all admin commands
-ADMIN_USER_ID = 300157754012860425
+# Specific user IDs that have access to all admin commands
+ADMIN_USER_IDS = [300157754012860425, 1354616827380236409]
+
 
 def check_admin_or_specific_user(inter: disnake.ApplicationCommandInteraction) -> bool:
     """Check if user has admin permissions or is the specific user"""
     # Check if user has manage guild permission (admin role)
     if inter.author.guild_permissions.manage_guild:
         return True
-    # Check if user is the specific admin user
-    if inter.author.id == ADMIN_USER_ID:
+    # Check if user is one of the specific admin users
+    if inter.author.id in ADMIN_USER_IDS:
         return True
     return False
 
@@ -618,7 +619,11 @@ class ScheduleCog(commands.Cog):
             "",
             "**📊 `/view_yesterday_rsvps`** - Check RSVP responses from yesterday's event. Useful for tracking attendance patterns.",
             "",
-            "**🔄 `/force_sync`** - Refresh the bot's commands in Discord. Use this if commands aren't appearing properly."
+            "**🚀 `/force_post_rsvp`** - Manually post today's RSVP if it didn't post automatically. Useful for troubleshooting or late posts.",
+            "",
+            "**🔄 `/force_sync`** - Refresh the bot's commands in Discord. Use this if commands aren't appearing properly.",
+            "",
+            "**📋 `/list_commands`** - Show this list of all available commands with descriptions."
         ]
         
         embed = disnake.Embed(
