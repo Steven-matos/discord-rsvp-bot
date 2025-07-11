@@ -210,8 +210,8 @@ class ScheduleCog(commands.Cog):
     async def cleanup_old_posts_task(self):
         """Clean up old daily posts to keep channels clean"""
         try:
-            # Get yesterday's date as cutoff (delete posts older than yesterday)
-            yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
+            # Get yesterday's date as cutoff using Eastern time (delete posts older than yesterday)
+            yesterday = datetime.now(self.eastern_tz).date() - timedelta(days=1)
             
             # Get all old posts
             old_posts = await database.get_old_daily_posts(yesterday)
@@ -305,9 +305,10 @@ class ScheduleCog(commands.Cog):
         """Post today's event to the specified channel"""
         guild_id = guild.id
         
-        # Get today's day of week
-        today = datetime.now(timezone.utc)
-        day_name = calendar.day_name[today.weekday()].lower()
+        # Get today's day of week (using Eastern time to determine the current day)
+        today_eastern = datetime.now(self.eastern_tz)
+        today = today_eastern.astimezone(timezone.utc)  # Convert to UTC for database storage
+        day_name = calendar.day_name[today_eastern.weekday()].lower()
         
         # Check if current week's schedule is set up
         is_current_week_setup = await self.check_current_week_setup(guild_id)
@@ -334,11 +335,7 @@ class ScheduleCog(commands.Cog):
         event_time = datetime.strptime(event_time_str, '%H:%M:%S').time()
         
         # Create event datetime in Eastern time
-        eastern_now = datetime.now(self.eastern_tz)
-        event_datetime_eastern = eastern_now.replace(
-            year=today.year, 
-            month=today.month, 
-            day=today.day,
+        event_datetime_eastern = today_eastern.replace(
             hour=event_time.hour,
             minute=event_time.minute,
             second=0,
@@ -357,7 +354,7 @@ class ScheduleCog(commands.Cog):
             title=f"🎯 Today's Event - {day_name.capitalize()}",
             description=f"**{event_data['event_name']}**",
             color=disnake.Color.blue(),
-            timestamp=today
+            timestamp=today_eastern.astimezone(timezone.utc)
         )
         
         embed.add_field(
@@ -380,7 +377,7 @@ class ScheduleCog(commands.Cog):
         
         embed.add_field(
             name="📅 Date",
-            value=today.strftime("%A, %B %d, %Y"),
+            value=today_eastern.strftime("%A, %B %d, %Y"),
             inline=False
         )
         
@@ -406,8 +403,8 @@ class ScheduleCog(commands.Cog):
             return
         
         try:
-            # Send the message
-            message = await channel.send(embed=embed, view=view)
+            # Send the message with @everyone ping
+            message = await channel.send("@everyone", embed=embed, view=view)
             
             # Save to database
             post_id = await database.save_daily_post(
@@ -433,7 +430,8 @@ class ScheduleCog(commands.Cog):
     async def delete_todays_existing_posts(self, guild_id: int, channel: disnake.TextChannel):
         """Delete any existing bot posts from today before posting new ones"""
         try:
-            today = datetime.now(timezone.utc).date()
+            # Use Eastern time to determine what day it is
+            today = datetime.now(self.eastern_tz).date()
             
             # Get today's existing post from database
             existing_post = await database.get_daily_post(guild_id, today)
@@ -484,10 +482,10 @@ class ScheduleCog(commands.Cog):
             if not schedule_updated:
                 return False
             
-            # Get the start of the current week (Monday)
-            today = datetime.now(timezone.utc)
-            days_since_monday = today.weekday()
-            start_of_week = today - timedelta(days=days_since_monday)
+            # Get the start of the current week (Monday) using Eastern time
+            today_eastern = datetime.now(self.eastern_tz)
+            days_since_monday = today_eastern.weekday()
+            start_of_week = today_eastern - timedelta(days=days_since_monday)
             start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
             
             # Check if schedule was updated this week
@@ -500,8 +498,8 @@ class ScheduleCog(commands.Cog):
     async def notify_admins_no_schedule(self, guild: disnake.Guild, channel: disnake.TextChannel):
         """Notify admins that the current week's schedule hasn't been set up"""
         try:
-            # Check if we've already notified today
-            today = datetime.now(timezone.utc).date()
+            # Check if we've already notified today (using Eastern time)
+            today = datetime.now(self.eastern_tz).date()
             if await database.check_admin_notification_sent(guild.id, today):
                 return  # Already notified today
             
@@ -562,8 +560,8 @@ class ScheduleCog(commands.Cog):
                 if not settings.get('reminder_enabled', True):
                     continue
                 
-                # Get today's event
-                today = datetime.now(timezone.utc).date()
+                # Get today's event (using Eastern time to determine the day)
+                today = datetime.now(self.eastern_tz).date()
                 post_data = await database.get_daily_post(guild_id, today)
                 
                 if not post_data:
@@ -1172,7 +1170,8 @@ class ScheduleCog(commands.Cog):
     async def view_rsvps(self, inter: disnake.ApplicationCommandInteraction):
         """View RSVP responses for today's event"""
         guild_id = inter.guild.id
-        today = datetime.now(timezone.utc).date()
+        # Use Eastern time to determine what day it is
+        today = datetime.now(self.eastern_tz).date()
         
         # Get today's post
         post_data = await database.get_daily_post(guild_id, today)
@@ -1296,7 +1295,8 @@ class ScheduleCog(commands.Cog):
     async def view_yesterday_rsvps(self, inter: disnake.ApplicationCommandInteraction):
         """View RSVP responses for yesterday's event"""
         guild_id = inter.guild.id
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
+        # Use Eastern time to determine what day it is
+        yesterday = (datetime.now(self.eastern_tz) - timedelta(days=1)).date()
         
         # Get yesterday's post
         post_data = await database.get_daily_post(guild_id, yesterday)
@@ -1440,7 +1440,8 @@ class ScheduleCog(commands.Cog):
         
         try:
             guild_id = inter.guild.id
-            today = datetime.now(timezone.utc).date()
+            # Use Eastern time to determine what day it is
+            today = datetime.now(self.eastern_tz).date()
             
             # Send initial status update
             try:
@@ -1711,8 +1712,8 @@ class ScheduleCog(commands.Cog):
         try:
             guild_id = inter.guild.id
             
-            # Get yesterday's date as cutoff (delete posts older than yesterday)
-            yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
+            # Get yesterday's date as cutoff using Eastern time (delete posts older than yesterday)
+            yesterday = datetime.now(self.eastern_tz).date() - timedelta(days=1)
             
             # Get all old posts for this guild
             old_posts = await database.get_old_daily_posts(yesterday)
