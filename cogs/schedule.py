@@ -107,7 +107,45 @@ class NextDayButton(disnake.ui.View):
     async def next_day_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
         # Present modal for next day
         modal = ScheduleDayModal(self.next_day, self.guild_id)
-        await inter.response.send_modal(modal)
+        
+        try:
+            # Check if interaction has already been acknowledged
+            if inter.response.is_done():
+                await inter.followup.send(
+                    "❌ Unable to continue setup due to interaction timing issue. Please try again.",
+                    ephemeral=True
+                )
+                return
+            
+            await inter.response.send_modal(modal)
+        except disnake.HTTPException as e:
+            # If the interaction has already been acknowledged, send a followup
+            try:
+                await inter.followup.send(
+                    "❌ Unable to continue setup due to interaction timing issue. Please try again.",
+                    ephemeral=True
+                )
+            except:
+                print(f"Failed to send followup message for NextDayButton: {e}")
+            
+            print(f"Error sending modal in NextDayButton: {e}")
+        except Exception as e:
+            # Handle any other errors
+            try:
+                if not inter.response.is_done():
+                    await inter.response.send_message(
+                        "❌ An error occurred while continuing setup. Please try again.",
+                        ephemeral=True
+                    )
+                else:
+                    await inter.followup.send(
+                        "❌ An error occurred while continuing setup. Please try again.",
+                        ephemeral=True
+                    )
+            except:
+                print(f"Failed to send error message for NextDayButton: {e}")
+            
+            print(f"Unexpected error in NextDayButton: {e}")
     
     async def on_timeout(self):
         # Disable the button when timeout occurs
@@ -829,7 +867,55 @@ class ScheduleCog(commands.Cog):
         first_day = self.days[0]
         modal = ScheduleDayModal(first_day, guild_id)
         
-        await inter.response.send_modal(modal)
+        try:
+            # Check if interaction has already been acknowledged
+            if inter.response.is_done():
+                await inter.followup.send(
+                    "❌ Unable to start setup due to interaction timing issue. Please try again.",
+                    ephemeral=True
+                )
+                # Clean up setup state
+                if guild_id in self.current_setups:
+                    del self.current_setups[guild_id]
+                return
+            
+            await inter.response.send_modal(modal)
+        except disnake.HTTPException as e:
+            # If the interaction has already been acknowledged, send a followup
+            try:
+                await inter.followup.send(
+                    "❌ Unable to start setup due to interaction timing issue. Please try again.",
+                    ephemeral=True
+                )
+            except:
+                print(f"Failed to send followup message for setup_weekly_schedule: {e}")
+            
+            # Clean up setup state
+            if guild_id in self.current_setups:
+                del self.current_setups[guild_id]
+            
+            print(f"Error sending modal in setup_weekly_schedule: {e}")
+        except Exception as e:
+            # Handle any other errors
+            try:
+                if not inter.response.is_done():
+                    await inter.response.send_message(
+                        "❌ An error occurred while starting the setup. Please try again.",
+                        ephemeral=True
+                    )
+                else:
+                    await inter.followup.send(
+                        "❌ An error occurred while starting the setup. Please try again.",
+                        ephemeral=True
+                    )
+            except:
+                print(f"Failed to send error message for setup_weekly_schedule: {e}")
+            
+            # Clean up setup state
+            if guild_id in self.current_setups:
+                del self.current_setups[guild_id]
+            
+            print(f"Unexpected error in setup_weekly_schedule: {e}")
     
     @commands.slash_command(
         name="reset_setup",
@@ -1122,14 +1208,47 @@ class ScheduleCog(commands.Cog):
             
             # Create and show edit modal (will work for both new and existing events)
             modal = EditEventModal(day, guild_id, current_data)
+            
+            # Check if interaction has already been acknowledged
+            if inter.response.is_done():
+                await inter.followup.send(
+                    "❌ Unable to show edit modal due to interaction timing issue. Please try again.",
+                    ephemeral=True
+                )
+                return
+            
             await inter.response.send_modal(modal)
             
+        except disnake.HTTPException as e:
+            # If the interaction has already been acknowledged, send a followup
+            try:
+                await inter.followup.send(
+                    "❌ Unable to show edit modal due to interaction timing issue. Please try again.",
+                    ephemeral=True
+                )
+            except:
+                print(f"Failed to send followup message for edit_event: {e}")
+            
+            print(f"Error sending modal in edit_event: {e}")
         except Exception as e:
-            await inter.response.send_message(
-                f"❌ **Error Editing Event**\n"
-                f"An error occurred: {str(e)}",
-                ephemeral=True
-            )
+            # Handle any other errors
+            try:
+                if not inter.response.is_done():
+                    await inter.response.send_message(
+                        f"❌ **Error Editing Event**\n"
+                        f"An error occurred: {str(e)}",
+                        ephemeral=True
+                    )
+                else:
+                    await inter.followup.send(
+                        f"❌ **Error Editing Event**\n"
+                        f"An error occurred: {str(e)}",
+                        ephemeral=True
+                    )
+            except:
+                print(f"Failed to send error message for edit_event: {e}")
+            
+            print(f"Unexpected error in edit_event: {e}")
     
     @commands.slash_command(
         name="view_schedule",
