@@ -348,6 +348,75 @@ async def get_daily_post(guild_id: int, event_date: date) -> Optional[dict]:
         print(f"Error getting daily post for guild {guild_id}, date {event_date}: {e}")
         return None
 
+async def get_all_daily_posts_for_date(guild_id: int, event_date: date) -> List[dict]:
+    """
+    Get ALL daily posts for a specific date (handles multiple posts per day).
+    
+    Args:
+        guild_id: Discord guild ID
+        event_date: Date of the event
+    
+    Returns:
+        List of post data dictionaries
+    """
+    try:
+        client = get_supabase_client()
+        
+        result = client.table('daily_posts').select('*').eq('guild_id', guild_id).eq('event_date', event_date.isoformat()).execute()
+        
+        if not result.data:
+            return []
+        
+        # Parse the event_data JSON for all posts
+        for post_data in result.data:
+            post_data['event_data'] = json.loads(post_data['event_data'])
+        
+        return result.data
+        
+    except Exception as e:
+        print(f"Error getting all daily posts for guild {guild_id}, date {event_date}: {e}")
+        return []
+
+async def get_aggregated_rsvp_responses_for_date(guild_id: int, event_date: date) -> List[dict]:
+    """
+    Get aggregated RSVP responses for all posts on a specific date.
+    If a user has multiple RSVPs for the same date, returns their most recent response.
+    
+    Args:
+        guild_id: Discord guild ID
+        event_date: Date of the event
+    
+    Returns:
+        List of RSVP response dictionaries (deduplicated by user)
+    """
+    try:
+        # Get all posts for the date
+        posts = await get_all_daily_posts_for_date(guild_id, event_date)
+        
+        if not posts:
+            return []
+        
+        # Collect all RSVPs from all posts
+        all_rsvps = []
+        for post in posts:
+            post_rsvps = await get_rsvp_responses(post['id'])
+            all_rsvps.extend(post_rsvps)
+        
+        # Deduplicate by user_id, keeping the most recent response
+        user_rsvps = {}
+        for rsvp in all_rsvps:
+            user_id = rsvp['user_id']
+            # If we don't have this user yet, or this response is newer, use it
+            if (user_id not in user_rsvps or 
+                rsvp['responded_at'] > user_rsvps[user_id]['responded_at']):
+                user_rsvps[user_id] = rsvp
+        
+        return list(user_rsvps.values())
+        
+    except Exception as e:
+        print(f"Error getting aggregated RSVP responses for guild {guild_id}, date {event_date}: {e}")
+        return []
+
 async def save_rsvp_response(post_id: str, user_id: int, guild_id: int, response_type: str) -> bool:
     """
     Save an RSVP response to the database.

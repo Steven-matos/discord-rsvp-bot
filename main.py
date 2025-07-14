@@ -128,8 +128,10 @@ async def load_persistent_views():
                 continue
             
             # Check for recent posts that might need persistent views
+            # Use Eastern timezone for consistency with post creation/querying
+            eastern_tz = timezone(timedelta(hours=-5))  # Eastern timezone
             for days_back in range(7):  # Check last 7 days
-                check_date = (datetime.now(timezone.utc) - timedelta(days=days_back)).date()
+                check_date = (datetime.now(eastern_tz) - timedelta(days=days_back)).date()
                 
                 post_data = await database.get_daily_post(guild_id, check_date)
                 if post_data:

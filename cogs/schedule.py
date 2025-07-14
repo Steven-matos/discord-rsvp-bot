@@ -307,7 +307,6 @@ class ScheduleCog(commands.Cog):
         
         # Get today's day of week (using Eastern time to determine the current day)
         today_eastern = datetime.now(self.eastern_tz)
-        today = today_eastern.astimezone(timezone.utc)  # Convert to UTC for database storage
         day_name = calendar.day_name[today_eastern.weekday()].lower()
         
         # Check if current week's schedule is set up
@@ -406,12 +405,12 @@ class ScheduleCog(commands.Cog):
             # Send the message with @everyone ping
             message = await channel.send("@everyone", embed=embed, view=view)
             
-            # Save to database
+            # Save to database (use Eastern date for consistency)
             post_id = await database.save_daily_post(
                 guild_id, 
                 channel.id, 
                 message.id, 
-                today.date(), 
+                today_eastern.date(), 
                 day_name, 
                 event_data
             )
@@ -736,6 +735,8 @@ class ScheduleCog(commands.Cog):
             "__**🛠️ Troubleshooting & Fixes**__",
             "**🚀 `/force_post_rsvp`** - Didn't get today's event post? Use this to make me post it right now.",
             "",
+            "**🔄 `/reset_setup`** - Stuck on 'setup already in progress'? This clears the setup state so you can start fresh.",
+            "",
             "**🗑️ `/delete_message`** - Remove any unwanted message by copying its ID. Useful for cleaning up mistakes.",
             "",
             "**🔄 `/force_sync`** - Commands not showing up when you type '/'? This refreshes everything.",
@@ -815,7 +816,8 @@ class ScheduleCog(commands.Cog):
         if guild_id in self.current_setups:
             await inter.response.send_message(
                 "⚠️ Weekly schedule setup is already in progress for this server. "
-                "Please complete the current setup before starting a new one.",
+                "Please complete the current setup before starting a new one.\n\n"
+                "**If you're stuck, use `/reset_setup` to clear the setup state.**",
                 ephemeral=True
             )
             return
@@ -828,6 +830,41 @@ class ScheduleCog(commands.Cog):
         modal = ScheduleDayModal(first_day, guild_id)
         
         await inter.response.send_modal(modal)
+    
+    @commands.slash_command(
+        name="reset_setup",
+        description="Reset/clear any stuck weekly schedule setup process (admin only)"
+    )
+    async def reset_setup(self, inter: disnake.ApplicationCommandInteraction):
+        """Reset/clear any stuck weekly schedule setup process"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        guild_id = inter.guild.id
+        
+        # Check if guild is in setup process
+        if guild_id in self.current_setups:
+            # Clear the setup state
+            del self.current_setups[guild_id]
+            await inter.response.send_message(
+                "✅ **Setup State Cleared!**\n"
+                "The weekly schedule setup process has been reset.\n"
+                "You can now use `/setup_weekly_schedule` to start fresh.",
+                ephemeral=True
+            )
+        else:
+            await inter.response.send_message(
+                "ℹ️ **No Active Setup Found**\n"
+                "There is no active weekly schedule setup process for this server.\n"
+                "You can use `/setup_weekly_schedule` to start a new setup.",
+                ephemeral=True
+            )
+            return
     
     @commands.slash_command(
         name="set_event_channel",
@@ -1173,9 +1210,9 @@ class ScheduleCog(commands.Cog):
         # Use Eastern time to determine what day it is
         today = datetime.now(self.eastern_tz).date()
         
-        # Get today's post
-        post_data = await database.get_daily_post(guild_id, today)
-        if not post_data:
+        # Get all posts for today (handles both automatic and manual posts)
+        posts = await database.get_all_daily_posts_for_date(guild_id, today)
+        if not posts:
             await inter.response.send_message(
                 "❌ **No Event Posted Today**\n"
                 "No daily event has been posted for today yet.",
@@ -1183,8 +1220,11 @@ class ScheduleCog(commands.Cog):
             )
             return
         
-        # Get RSVP responses
-        rsvps = await database.get_rsvp_responses(post_data['id'])
+        # Get aggregated RSVP responses from all posts for today
+        rsvps = await database.get_aggregated_rsvp_responses_for_date(guild_id, today)
+        
+        # Use the most recent post for event details (they should all be the same event)
+        post_data = posts[-1]  # Most recent post
         
         # Get all guild members (excluding bots)
         all_members = [member for member in inter.guild.members if not member.bot]
@@ -1245,8 +1285,12 @@ class ScheduleCog(commands.Cog):
                     continue
         
         # Create embed
+        embed_title = "📋 RSVP Summary - Today's Event"
+        if len(posts) > 1:
+            embed_title += f" ({len(posts)} posts)"
+        
         embed = disnake.Embed(
-            title="📋 RSVP Summary - Today's Event",
+            title=embed_title,
             description=f"**{post_data['event_data']['event_name']}**",
             color=disnake.Color.blue()
         )
@@ -1298,9 +1342,9 @@ class ScheduleCog(commands.Cog):
         # Use Eastern time to determine what day it is
         yesterday = (datetime.now(self.eastern_tz) - timedelta(days=1)).date()
         
-        # Get yesterday's post
-        post_data = await database.get_daily_post(guild_id, yesterday)
-        if not post_data:
+        # Get all posts for yesterday (handles both automatic and manual posts)
+        posts = await database.get_all_daily_posts_for_date(guild_id, yesterday)
+        if not posts:
             await inter.response.send_message(
                 "❌ **No Event Posted Yesterday**\n"
                 f"No daily event was posted for {yesterday.strftime('%B %d, %Y')}.",
@@ -1308,8 +1352,11 @@ class ScheduleCog(commands.Cog):
             )
             return
         
-        # Get RSVP responses
-        rsvps = await database.get_rsvp_responses(post_data['id'])
+        # Get aggregated RSVP responses from all posts for yesterday
+        rsvps = await database.get_aggregated_rsvp_responses_for_date(guild_id, yesterday)
+        
+        # Use the most recent post for event details (they should all be the same event)
+        post_data = posts[-1]  # Most recent post
         
         # Get all guild members (excluding bots)
         all_members = [member for member in inter.guild.members if not member.bot]
@@ -1370,8 +1417,12 @@ class ScheduleCog(commands.Cog):
                     continue
         
         # Create embed
+        embed_title = "📋 RSVP Summary - Yesterday's Event"
+        if len(posts) > 1:
+            embed_title += f" ({len(posts)} posts)"
+        
         embed = disnake.Embed(
-            title="📋 RSVP Summary - Yesterday's Event",
+            title=embed_title,
             description=f"**{post_data['event_data']['event_name']}**\n📅 {yesterday.strftime('%B %d, %Y')}",
             color=disnake.Color.orange()
         )
