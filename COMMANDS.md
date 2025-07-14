@@ -28,6 +28,12 @@ Outfit: Combat Gear
 Vehicle: Tank
 ```
 
+**Error Handling:**
+- If the modal fails to appear due to timing issues, you'll get a clear error message
+- Simply try the command again - no need to restart or wait
+- Failed setups automatically clean up their state so you can retry immediately
+- The "Continue to Next Day" button also has improved error handling for timing issues
+
 #### `/set_event_channel`
 **What it does:** Chooses which Discord channel the bot will post daily events to.
 
@@ -128,6 +134,11 @@ Wednesday: No event scheduled
 /edit_event day:monday
 ```
 *Then modify the form that appears*
+
+**Error Handling:**
+- If the modal fails to appear due to timing issues, you'll get a clear error message
+- Simply try the command again - no need to restart or wait
+- The bot now handles Discord's interaction timing automatically
 
 #### `/force_post_rsvp`
 **What it does:** Manually posts today's RSVP if the automatic daily posting failed or didn't happen.
@@ -300,6 +311,22 @@ Raid Night
 1. Wait for the current setup to finish
 2. Or restart the bot and try again
 3. Use `/list_commands` to see available options
+
+### If Setup Commands Fail with "Interaction Already Acknowledged"
+1. **This error has been fixed** - the bot now handles Discord's interaction timing automatically
+2. If you still see this error, simply **try the command again**
+3. Failed setups now **automatically clean up** their state so you can retry immediately
+4. The bot will show clear error messages if timing issues occur
+5. You can safely retry `/setup_weekly_schedule` or `/edit_event` without restarting the bot
+
+### If Modals Don't Appear
+1. The bot now checks for interaction timing issues before sending modals
+2. If a modal fails to appear, you'll get a clear error message
+3. Simply **try the command again** - no need to restart or wait
+4. Common modal commands that are now more reliable:
+   - `/setup_weekly_schedule`
+   - `/edit_event`
+   - Clicking "Continue to Next Day" during setup
 
 ### If Reminders Aren't Working
 1. Check your reminder settings with `/configure_reminders`

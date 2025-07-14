@@ -213,6 +213,12 @@ The bot works automatically once you set it up:
 - Make sure the bot has "Use Slash Commands" permission
 - Wait up to 1 hour for Discord to update
 
+### Setup Commands Failing with "Interaction Already Acknowledged"?
+- This error has been fixed in the latest update
+- If you still encounter it, try running the command again
+- The bot now handles Discord's interaction timing automatically
+- Failed setups will clean up their state so you can retry immediately
+
 ### Database Errors?
 - Double-check your Supabase URL and key in the `.env` file
 - Make sure you ran all the SQL files in Supabase
@@ -237,6 +243,12 @@ The bot works automatically once you set it up:
 - Ask a server admin to grant these permissions to the bot
 - The specific user ID (300157754012860425) has access to all admin commands regardless of role
 
+### Modal/Setup Commands Not Working?
+- The bot now automatically handles Discord interaction timing issues
+- If a modal fails to appear, you'll get a clear error message to try again
+- Setup processes that fail will automatically clean up their state
+- You can safely retry `/setup_weekly_schedule` or `/edit_event` immediately after failures
+
 ## 🎯 Tips for Success
 
 1. **Start Simple**: Set up just a few days first, then add more
@@ -256,7 +268,23 @@ If something isn't working:
 
 ## 🎉 What's New
 
-### Latest Update: Performance & Reliability Improvements ✅
+### Latest Update: Interaction Timing & Modal Fixes ✅
+**Fixed critical "Interaction has already been acknowledged" errors and improved modal handling.**
+
+#### What Changed:
+- **Modal Timing Fix**: Fixed "Interaction has already been acknowledged" errors for `/setup_weekly_schedule`, `/edit_event`, and setup continuation buttons
+- **Robust Error Handling**: All modal-sending commands now handle Discord's interaction timing issues gracefully
+- **Better User Feedback**: When timing issues occur, users get clear error messages instead of confusing failures
+- **Setup State Cleanup**: Failed setups now properly clean up their state to prevent stuck processes
+- **Improved Reliability**: Modal commands now work consistently even under high server load or network delays
+
+#### Technical Improvements:
+- **Pre-acknowledgment Checks**: Commands verify interaction state before sending modals
+- **Fallback Messaging**: Uses followup messages when interactions are already acknowledged
+- **Exception Handling**: Comprehensive error handling for all modal-related operations
+- **State Management**: Proper cleanup of setup processes when errors occur
+
+### Previous Update: Performance & Reliability Improvements ✅
 **Enhanced command performance and added automatic cleanup of duplicate posts.**
 
 #### What Changed:
