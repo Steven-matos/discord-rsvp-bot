@@ -338,6 +338,32 @@ Raid Night
 2. Make sure the bot has "Manage Messages" permission in the event channel
 3. Use `/delete_message` to manually remove specific unwanted messages
 
+### If Database Errors Occur
+The bot now provides detailed error messages instead of cryptic errors like "[Errno -2] Name or service not known". Here's what each error type means:
+
+**🚨 DNS Resolution Failed:**
+- Your Supabase project may have expired or been deleted
+- Check your project status at https://supabase.com
+- Verify your SUPABASE_URL in .env file is correct
+- Try creating a new Supabase project if the current one no longer exists
+
+**🚨 Connection Timeout:**
+- Check your internet connection
+- Verify firewall settings aren't blocking the connection
+- Check Supabase service status at https://status.supabase.com
+
+**🚨 Authentication Error:**
+- Your SUPABASE_KEY may be invalid or expired
+- Check your Supabase project settings
+- Regenerate your API key if needed
+- Update your .env file with the correct SUPABASE_KEY
+
+**🚨 Generic Database Error:**
+- Double-check your Supabase URL and key in the `.env` file
+- Make sure you ran all the SQL files in Supabase
+- Check that your Supabase project is active
+- Try restarting the bot
+
 ## 📋 Command Summary Table
 
 | Command | Purpose | Who Can Use | Required Setup |

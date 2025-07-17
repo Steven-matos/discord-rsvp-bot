@@ -268,7 +268,29 @@ If something isn't working:
 
 ## 🎉 What's New
 
-### Latest Update: Interaction Timing & Modal Fixes ✅
+### Latest Update: Enhanced Database Error Handling ✅
+**Replaced cryptic database errors with clear, actionable error messages.**
+
+#### What Changed:
+- **Clear Error Messages**: Instead of "[Errno -2] Name or service not known", you now get detailed explanations of what went wrong
+- **Actionable Solutions**: Each error message includes specific steps to resolve the issue
+- **Multiple Error Types**: Handles DNS resolution failures, connection timeouts, authentication errors, and service unavailability
+- **Visual Alerts**: Error messages are formatted with 🚨 icons and clear sections for easy reading
+- **Debug Information**: Shows which operation failed and provides relevant troubleshooting steps
+
+#### Error Types Now Handled:
+- **DNS Resolution Failed**: Clear indication that Supabase project may be expired or deleted
+- **Connection Timeout**: Guidance on checking internet and firewall settings
+- **Authentication Errors**: Help with API key validation and project settings
+- **Service Unavailable**: Directs users to check Supabase service status
+
+#### Technical Improvements:
+- **Exception Categorization**: Different connection error types are caught and handled specifically
+- **Fallback Error Handling**: Unexpected errors still provide helpful information
+- **Consistent Error Format**: All database operations use the same error handling system
+- **Operation Context**: Error messages include which specific operation failed for better debugging
+
+### Previous Update: Interaction Timing & Modal Fixes ✅
 **Fixed critical "Interaction has already been acknowledged" errors and improved modal handling.**
 
 #### What Changed:

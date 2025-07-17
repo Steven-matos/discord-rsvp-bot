@@ -3,6 +3,13 @@ import json
 from supabase import create_client, Client # type: ignore
 from typing import Dict, Optional, List
 from datetime import date, datetime
+import socket
+from urllib.error import URLError
+try:
+    from httpx import ConnectError, ReadTimeout, ConnectTimeout
+except ImportError:
+    # Fallback if httpx is not available
+    ConnectError = ReadTimeout = ConnectTimeout = Exception
 
 # Load environment variables from .env file
 from dotenv import load_dotenv # type: ignore
@@ -14,6 +21,92 @@ SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("SUPABASE_URL and SUPABASE_KEY environment variables must be set")
+
+def handle_connection_error(error: Exception, operation: str = "database operation") -> str:
+    """
+    Handle connection errors and return user-friendly error messages.
+    
+    Args:
+        error: The exception that occurred
+        operation: Description of what operation was being performed
+    
+    Returns:
+        User-friendly error message
+    """
+    error_str = str(error).lower()
+    
+    # DNS resolution errors
+    if "name or service not known" in error_str or "getaddrinfo failed" in error_str:
+        return f"""
+🚨 SUPABASE CONNECTION ERROR 🚨
+Cannot connect to Supabase database - DNS resolution failed.
+
+Possible causes:
+• Your Supabase project may have expired or been deleted
+• Network connectivity issues
+• DNS server problems
+
+Solutions:
+1. Check your Supabase project status at https://supabase.com
+2. Verify your SUPABASE_URL in .env file: {SUPABASE_URL}
+3. Try creating a new Supabase project if the current one no longer exists
+4. Check your internet connection
+
+Operation that failed: {operation}
+"""
+    
+    # Connection timeout or refused
+    elif "connection" in error_str and ("timeout" in error_str or "refused" in error_str):
+        return f"""
+🚨 SUPABASE CONNECTION ERROR 🚨
+Cannot connect to Supabase database - connection failed.
+
+Possible causes:
+• Supabase service may be down
+• Network firewall blocking the connection
+• Internet connectivity issues
+
+Solutions:
+1. Check Supabase status at https://status.supabase.com
+2. Try again in a few minutes
+3. Check your firewall settings
+4. Verify your internet connection
+
+Operation that failed: {operation}
+"""
+    
+    # Authentication errors
+    elif "unauthorized" in error_str or "invalid" in error_str and "key" in error_str:
+        return f"""
+🚨 SUPABASE AUTHENTICATION ERROR 🚨
+Cannot authenticate with Supabase database.
+
+Possible causes:
+• Invalid or expired SUPABASE_KEY
+• Project settings may have changed
+
+Solutions:
+1. Check your Supabase project settings at https://supabase.com
+2. Regenerate your API key if needed
+3. Update your .env file with the correct SUPABASE_KEY
+
+Operation that failed: {operation}
+"""
+    
+    # Generic connection error
+    else:
+        return f"""
+🚨 SUPABASE DATABASE ERROR 🚨
+An error occurred while connecting to the database.
+
+Error details: {error}
+Operation that failed: {operation}
+
+Solutions:
+1. Check your Supabase project at https://supabase.com
+2. Verify your .env file configuration
+3. Try restarting the bot
+"""
 
 # Supabase client
 supabase_client: Optional[Client] = None
@@ -32,11 +125,38 @@ async def close_db_pool():
     supabase_client = None
 
 def get_supabase_client():
-    """Get the Supabase client"""
+    """Get the Supabase client with improved error handling"""
     global supabase_client
     if supabase_client is None:
-        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        try:
+            supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        except Exception as e:
+            error_msg = handle_connection_error(e, "creating Supabase client")
+            print(error_msg)
+            raise
     return supabase_client
+
+def execute_supabase_query(query_func, operation_name: str, default_return=None):
+    """
+    Execute a Supabase query with improved error handling.
+    
+    Args:
+        query_func: Function that performs the Supabase query
+        operation_name: Description of the operation for error messages
+        default_return: Value to return if query fails
+    
+    Returns:
+        Query result or default_return if query fails
+    """
+    try:
+        return query_func()
+    except (ConnectError, ReadTimeout, ConnectTimeout, URLError, socket.gaierror, OSError) as e:
+        error_msg = handle_connection_error(e, operation_name)
+        print(error_msg)
+        return default_return
+    except Exception as e:
+        print(f"Unexpected error during {operation_name}: {e}")
+        return default_return
 
 async def save_day_data(guild_id: int, day: str, data: dict) -> bool:
     """
@@ -543,10 +663,8 @@ async def get_guilds_needing_reminders() -> List[dict]:
     Returns:
         List of guild data with reminder settings
     """
-    try:
+    def query():
         client = get_supabase_client()
-        
-        # Get all guilds with schedules and settings
         result = client.table('weekly_schedules').select(
             'guild_id, guild_settings!inner(*)'
         ).execute()
@@ -555,10 +673,8 @@ async def get_guilds_needing_reminders() -> List[dict]:
             return []
         
         return result.data
-        
-    except Exception as e:
-        print(f"Error getting guilds needing reminders: {e}")
-        return []
+    
+    return execute_supabase_query(query, "getting guilds needing reminders", [])
 
 async def update_day_data(guild_id: int, day: str, data: dict) -> bool:
     """

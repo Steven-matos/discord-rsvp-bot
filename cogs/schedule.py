@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import calendar
 import pytz
 import functools
+import os
 
 # Specific user IDs that have access to all admin commands
 ADMIN_USER_IDS = [300157754012860425, 1354616827380236409]
@@ -790,7 +791,11 @@ class ScheduleCog(commands.Cog):
             "",
             "**🔍 `/monitor_status`** - Detailed bot health info (for tech-savvy users).",
             "",
-            "**🔧 `/test_connection`** - Test if I can connect to Discord and my database properly."
+            "**🔧 `/test_connection`** - Test if I can connect to Discord and my database properly.",
+            "",
+            "**⚙️ `/server_settings`** - Show all bot settings configured for this server.",
+            "",
+            "**🔍 `/debug_view_rsvps`** - Debug why view_rsvps isn't finding posts when they exist."
         ]
         
         embed = disnake.Embed(
@@ -2157,6 +2162,417 @@ class ScheduleCog(commands.Cog):
                 name=f"{field_name} ({len(no_rsvp_users)})",
                 value=no_rsvp_text,
                 inline=False
+            )
+
+    @commands.slash_command(
+        name="debug_view_rsvps",
+        description="Debug why view_rsvps isn't finding posts (admin only)"
+    )
+    async def debug_view_rsvps(self, inter: disnake.ApplicationCommandInteraction):
+        """Debug the view_rsvps command by showing detailed information"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        await inter.response.defer(ephemeral=True)
+        
+        try:
+            guild_id = inter.guild.id
+            
+            # Get today's date using Eastern timezone (same as view_rsvps)
+            today_eastern = datetime.now(self.eastern_tz)
+            today_date = today_eastern.date()
+            
+            # Get yesterday and tomorrow for comparison
+            yesterday = today_date - timedelta(days=1)
+            tomorrow = today_date + timedelta(days=1)
+            
+            # Create debug embed
+            embed = disnake.Embed(
+                title="🔍 Debug: View RSVPs Issue",
+                description=f"Debugging why `/view_rsvps` isn't finding posts for **{inter.guild.name}**",
+                color=disnake.Color.yellow()
+            )
+            
+            # Show timezone and date info
+            embed.add_field(
+                name="📅 Date Information",
+                value=f"**Current Eastern Time:** {today_eastern.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
+                      f"**Today's Date:** {today_date.isoformat()}\n"
+                      f"**Yesterday:** {yesterday.isoformat()}\n"
+                      f"**Tomorrow:** {tomorrow.isoformat()}\n"
+                      f"**Guild ID:** {guild_id}",
+                inline=False
+            )
+            
+            # Check posts for today, yesterday, and tomorrow
+            posts_today = await database.get_all_daily_posts_for_date(guild_id, today_date)
+            posts_yesterday = await database.get_all_daily_posts_for_date(guild_id, yesterday)
+            posts_tomorrow = await database.get_all_daily_posts_for_date(guild_id, tomorrow)
+            
+            embed.add_field(
+                name="📊 Posts Found",
+                value=f"**Today ({today_date}):** {len(posts_today)} posts\n"
+                      f"**Yesterday ({yesterday}):** {len(posts_yesterday)} posts\n"
+                      f"**Tomorrow ({tomorrow}):** {len(posts_tomorrow)} posts",
+                inline=False
+            )
+            
+            # Get ALL posts for this guild (regardless of date)
+            try:
+                client = database.get_supabase_client()
+                all_posts_result = client.table('daily_posts').select('*').eq('guild_id', guild_id).execute()
+                all_posts = all_posts_result.data if all_posts_result.data else []
+                
+                if all_posts:
+                    # Show recent posts
+                    recent_posts = []
+                    for post in all_posts[-5:]:  # Last 5 posts
+                        event_date = post['event_date']
+                        message_id = post['message_id']
+                        channel_id = post['channel_id']
+                        recent_posts.append(f"**{event_date}** - Message {message_id} in <#{channel_id}>")
+                    
+                    embed.add_field(
+                        name="📋 Recent Posts in Database",
+                        value="\n".join(recent_posts) if recent_posts else "No posts found",
+                        inline=False
+                    )
+                else:
+                    embed.add_field(
+                        name="📋 All Posts for Guild",
+                        value="❌ **No posts found in database for this guild**",
+                        inline=False
+                    )
+                    
+            except Exception as e:
+                embed.add_field(
+                    name="❌ Database Query Error",
+                    value=f"Error querying all posts: {str(e)}",
+                    inline=False
+                )
+            
+            # Show what the exact query would be
+            embed.add_field(
+                name="🔍 Query Details",
+                value=f"**Query:** `SELECT * FROM daily_posts WHERE guild_id = {guild_id} AND event_date = '{today_date.isoformat()}'`\n"
+                      f"**Date Format:** ISO format (YYYY-MM-DD)",
+                inline=False
+            )
+            
+            # Show potential solutions
+            solutions = []
+            if len(posts_today) == 0:
+                solutions.append("• No posts found for today - try `/force_post_rsvp` to create one")
+            if len(posts_yesterday) > 0:
+                solutions.append("• Posts exist for yesterday - might be a timezone issue")
+            if len(posts_tomorrow) > 0:
+                solutions.append("• Posts exist for tomorrow - might be a timezone issue")
+            
+            if solutions:
+                embed.add_field(
+                    name="💡 Potential Solutions",
+                    value="\n".join(solutions),
+                    inline=False
+                )
+            
+            embed.set_footer(text="This command helps identify why view_rsvps isn't working")
+            
+            await inter.edit_original_message(embed=embed)
+            
+        except Exception as e:
+            await inter.edit_original_message(
+                f"❌ **Error in Debug Command**\n"
+                f"An error occurred while debugging: {str(e)}"
+            )
+
+    @commands.slash_command(
+        name="test_connection",
+        description="Test database connection and show configuration (admin only)"
+    )
+    async def test_connection(self, inter: disnake.ApplicationCommandInteraction):
+        """Test database connection and show configuration details"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        await inter.response.defer(ephemeral=True)
+        
+        try:
+            # Get environment variables
+            supabase_url = os.getenv('SUPABASE_URL')
+            supabase_key = os.getenv('SUPABASE_KEY')
+            
+            # Create test embed
+            embed = disnake.Embed(
+                title="🔧 Database Connection Test",
+                description="Testing connection to Supabase database",
+                color=disnake.Color.blue()
+            )
+            
+            # Show configuration (mask sensitive info)
+            if supabase_url:
+                # Show URL but mask sensitive parts
+                masked_url = supabase_url[:30] + "..." + supabase_url[-10:] if len(supabase_url) > 40 else supabase_url
+                embed.add_field(
+                    name="🌐 Database URL",
+                    value=f"**Status:** {'✅ Set' if supabase_url else '❌ Not Set'}\n"
+                          f"**URL:** `{masked_url}`\n"
+                          f"**Length:** {len(supabase_url)} characters",
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="🌐 Database URL",
+                    value="❌ **SUPABASE_URL not set in environment variables**",
+                    inline=False
+                )
+            
+            if supabase_key:
+                embed.add_field(
+                    name="🔑 Database Key",
+                    value=f"**Status:** {'✅ Set' if supabase_key else '❌ Not Set'}\n"
+                          f"**Key:** `{supabase_key[:20]}...`\n"
+                          f"**Length:** {len(supabase_key)} characters",
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="🔑 Database Key",
+                    value="❌ **SUPABASE_KEY not set in environment variables**",
+                    inline=False
+                )
+            
+            # Test actual connection
+            connection_status = "🔄 Testing connection..."
+            embed.add_field(
+                name="🔗 Connection Test",
+                value=connection_status,
+                inline=False
+            )
+            
+            await inter.edit_original_message(embed=embed)
+            
+            # Now test the actual connection
+            try:
+                client = database.get_supabase_client()
+                
+                # Try a simple query
+                result = client.table('weekly_schedules').select('guild_id').limit(1).execute()
+                
+                # Update embed with success
+                embed.set_field_at(
+                    -1,  # Last field (Connection Test)
+                    name="🔗 Connection Test",
+                    value="✅ **Connection Successful!**\n"
+                          "Successfully connected to Supabase database.",
+                    inline=False
+                )
+                embed.color = disnake.Color.green()
+                
+            except Exception as conn_error:
+                # Update embed with error details
+                error_msg = str(conn_error)
+                
+                # Provide specific help for common errors
+                if "Name or service not known" in error_msg:
+                    help_text = "\n\n**Possible Solutions:**\n" \
+                               "• Check your SUPABASE_URL is correct\n" \
+                               "• Ensure you have internet connectivity\n" \
+                               "• Try restarting the bot\n" \
+                               "• Check if your Supabase project is active"
+                elif "401" in error_msg or "Unauthorized" in error_msg:
+                    help_text = "\n\n**Possible Solutions:**\n" \
+                               "• Check your SUPABASE_KEY is correct\n" \
+                               "• Ensure the key has proper permissions\n" \
+                               "• Try regenerating the key in Supabase dashboard"
+                else:
+                    help_text = "\n\n**Possible Solutions:**\n" \
+                               "• Check your environment variables\n" \
+                               "• Restart the bot\n" \
+                               "• Check Supabase project status"
+                
+                embed.set_field_at(
+                    -1,  # Last field (Connection Test)
+                    name="🔗 Connection Test",
+                    value=f"❌ **Connection Failed!**\n"
+                          f"**Error:** {error_msg[:200]}{'...' if len(error_msg) > 200 else ''}{help_text}",
+                    inline=False
+                )
+                embed.color = disnake.Color.red()
+            
+            await inter.edit_original_message(embed=embed)
+            
+        except Exception as e:
+            await inter.edit_original_message(
+                f"❌ **Error Testing Connection**\n"
+                f"An error occurred while testing the database connection: {str(e)}"
+            )
+
+    @commands.slash_command(
+        name="server_settings",
+        description="Show all bot settings for this server (admin only)"
+    )
+    async def server_settings(self, inter: disnake.ApplicationCommandInteraction):
+        """Show all bot settings for this server"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        await inter.response.defer(ephemeral=True)
+        
+        try:
+            guild_id = inter.guild.id
+            
+            # Get guild settings from database
+            guild_settings = await database.get_guild_settings(guild_id)
+            
+            # Create settings embed
+            embed = disnake.Embed(
+                title="⚙️ Server Settings",
+                description=f"Bot configuration for **{inter.guild.name}**",
+                color=disnake.Color.blue(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            
+            # Event Channel Settings
+            event_channel_id = guild_settings.get('event_channel_id')
+            if event_channel_id:
+                event_channel = inter.guild.get_channel(event_channel_id)
+                channel_status = f"<#{event_channel_id}>" if event_channel else f"⚠️ Channel not found ({event_channel_id})"
+            else:
+                channel_status = "❌ Not configured"
+            
+            embed.add_field(
+                name="📢 Event Channel",
+                value=f"**Channel:** {channel_status}\n"
+                      f"**ID:** {event_channel_id if event_channel_id else 'None'}",
+                inline=False
+            )
+            
+            # Event Time Settings
+            event_time = guild_settings.get('event_time', '20:00:00')
+            try:
+                # Convert to 12-hour format for display
+                time_obj = datetime.strptime(event_time, '%H:%M:%S')
+                display_time = time_obj.strftime('%I:%M %p')
+            except:
+                display_time = event_time
+            
+            embed.add_field(
+                name="⏰ Event Time",
+                value=f"**Time:** {display_time} Eastern Time\n"
+                      f"**24-hour:** {event_time}",
+                inline=False
+            )
+            
+            # Reminder Settings
+            reminder_enabled = guild_settings.get('reminder_enabled', True)
+            reminder_4pm = guild_settings.get('reminder_4pm', True)
+            reminder_1_hour = guild_settings.get('reminder_1_hour', True)
+            reminder_15_minutes = guild_settings.get('reminder_15_minutes', True)
+            
+            reminder_status = "✅ Enabled" if reminder_enabled else "❌ Disabled"
+            reminder_details = []
+            if reminder_enabled:
+                reminder_details.append(f"{'✅' if reminder_4pm else '❌'} 4:00 PM Eastern")
+                reminder_details.append(f"{'✅' if reminder_1_hour else '❌'} 1 hour before event")
+                reminder_details.append(f"{'✅' if reminder_15_minutes else '❌'} 15 minutes before event")
+            
+            embed.add_field(
+                name="🔔 Reminder Settings",
+                value=f"**Status:** {reminder_status}\n"
+                      f"**Details:** {chr(10).join(reminder_details) if reminder_details else 'N/A'}",
+                inline=False
+            )
+            
+            # Admin Channel Settings
+            admin_channel_id = guild_settings.get('admin_channel_id')
+            if admin_channel_id:
+                admin_channel = inter.guild.get_channel(admin_channel_id)
+                admin_channel_status = f"<#{admin_channel_id}>" if admin_channel else f"⚠️ Channel not found ({admin_channel_id})"
+            else:
+                admin_channel_status = "❌ Not configured (uses event channel)"
+            
+            embed.add_field(
+                name="👑 Admin Channel",
+                value=f"**Channel:** {admin_channel_status}\n"
+                      f"**ID:** {admin_channel_id if admin_channel_id else 'None'}",
+                inline=False
+            )
+            
+            # Schedule Status
+            schedule = await database.get_guild_schedule(guild_id)
+            is_current_week_setup = await self.check_current_week_setup(guild_id)
+            
+            schedule_status = "✅ Configured" if schedule else "❌ Not configured"
+            current_week_status = "✅ Current week setup" if is_current_week_setup else "⚠️ Current week not setup"
+            
+            embed.add_field(
+                name="📅 Schedule Status",
+                value=f"**Weekly Schedule:** {schedule_status}\n"
+                      f"**Current Week:** {current_week_status}\n"
+                      f"**Days Configured:** {len(schedule)} of 7",
+                inline=False
+            )
+            
+            # Daily Posting Settings
+            auto_posting = "✅ Enabled (9:00 AM ET)" if guild_settings.get('auto_daily_posts', True) else "❌ Disabled"
+            
+            embed.add_field(
+                name="🔄 Automatic Features",
+                value=f"**Daily Posts:** {auto_posting}\n"
+                      f"**RSVP Tracking:** {'✅ Enabled' if guild_settings.get('rsvp_tracking', True) else '❌ Disabled'}",
+                inline=False
+            )
+            
+            # Database Information
+            embed.add_field(
+                name="💾 Database Info",
+                value=f"**Guild ID:** {guild_id}\n"
+                      f"**Settings Count:** {len(guild_settings)} items\n"
+                      f"**Last Updated:** {guild_settings.get('updated_at', 'Never')[:19] if guild_settings.get('updated_at') else 'Never'}",
+                inline=False
+            )
+            
+            # Add recommendations based on configuration
+            recommendations = []
+            if not event_channel_id:
+                recommendations.append("• Set up event channel with `/set_event_channel`")
+            if not schedule:
+                recommendations.append("• Configure weekly schedule with `/setup_weekly_schedule`")
+            if not is_current_week_setup:
+                recommendations.append("• Set up current week's schedule with `/setup_weekly_schedule`")
+            if not admin_channel_id:
+                recommendations.append("• Consider setting admin channel with `/set_admin_channel`")
+            
+            if recommendations:
+                embed.add_field(
+                    name="💡 Recommendations",
+                    value="\n".join(recommendations),
+                    inline=False
+                )
+            
+            embed.set_footer(text=f"Settings for {inter.guild.name} | Use /list_commands for help")
+            
+            await inter.edit_original_message(embed=embed)
+            
+        except Exception as e:
+            await inter.edit_original_message(
+                f"❌ **Error Getting Server Settings**\n"
+                f"An error occurred while retrieving server settings: {str(e)}"
             )
 
 def setup(bot):
