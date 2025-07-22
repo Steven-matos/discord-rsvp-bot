@@ -103,7 +103,13 @@ URL: https://discord.com/oauth2/authorize?client_id=1388283299562262559&permissi
    ```
    This example sets events to start at 8:00 PM Eastern Time.
 
-4. **Turn on reminders**
+4. **Set when daily posts appear** (optional)
+   ```
+   /set_posting_time hour:9 minute:0
+   ```
+   This sets when the daily RSVP posts are created (default is 9:00 AM Eastern).
+
+5. **Turn on reminders**
    ```
    /configure_reminders enabled:true four_pm:true one_hour:true fifteen_minutes:true
    ```
@@ -165,6 +171,7 @@ Anyone can see who's coming to events:
 | `/edit_event` | Edit an existing event for any day | Server Admins + Specific User |
 | `/set_event_channel` | Choose where events are posted | Server Admins + Specific User |
 | `/set_event_time` | Set what time events start | Server Admins + Specific User |
+| `/set_posting_time` | Set when daily RSVP posts are created | Server Admins + Specific User |
 | `/configure_reminders` | Control when reminders are sent | Server Admins + Specific User |
 | `/set_admin_channel` | Set admin notification channel | Server Admins + Specific User |
 | `/force_post_rsvp` | Manually post today's RSVP if automatic posting fails | Server Admins + Specific User |
@@ -196,7 +203,7 @@ The bot includes a special access system for a specific user ID (300157754012860
 
 The bot works automatically once you set it up:
 
-- **Daily Posts**: Events appear automatically at 9:00 AM Eastern Time
+- **Daily Posts**: Events appear automatically at your configured time (default: 9:00 AM Eastern)
 - **Smart Reminders**: Sends reminders based on your settings:
   - 4:00 PM Eastern (daily reminder)
   - 1 hour before the event

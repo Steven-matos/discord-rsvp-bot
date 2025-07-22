@@ -62,6 +62,26 @@ Vehicle: Tank
 ```
 *This sets events to start at 8:00 PM Eastern Time*
 
+#### `/set_posting_time`
+**What it does:** Sets what time the daily RSVP posts are created each day (in Eastern Time).
+
+**How to use:**
+1. Type `/set_posting_time`
+2. Enter the hour (0-23)
+3. Enter the minute (0-59)
+4. The bot will confirm the posting time is set
+
+**Example:**
+```
+/set_posting_time hour:9 minute:0
+```
+*This sets daily posts to be created at 9:00 AM Eastern Time*
+
+**Important Notes:**
+- This is different from event time - it's when the RSVP post appears in your channel
+- Default posting time is 9:00 AM Eastern if not configured
+- Each server can have its own posting time
+
 #### `/configure_reminders`
 **What it does:** Controls when reminder messages are sent for events.
 

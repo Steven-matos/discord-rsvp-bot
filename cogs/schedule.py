@@ -221,12 +221,15 @@ class ScheduleCog(commands.Cog):
     
     @tasks.loop(minutes=1)  # Check every minute
     async def daily_posting_task(self):
-        """Check if it's time to post daily events"""
+        """Check if it's time to post daily events for each guild based on their posting time"""
         now_eastern = datetime.now(self.eastern_tz)
         
-        # Post at 9 AM Eastern Time daily
-        if now_eastern.hour == 9 and now_eastern.minute == 0:
-            await self.post_daily_events()
+        # Only check at the top of each minute to avoid multiple posts
+        if now_eastern.second != 0:
+            return
+        
+        # Get all guilds with schedules and check their posting times
+        await self.check_and_post_daily_events()
     
     @daily_posting_task.before_loop
     async def before_daily_posting(self):
@@ -340,6 +343,45 @@ class ScheduleCog(commands.Cog):
             except Exception as e:
                 print(f"Error posting daily event for guild {guild_id}: {e}")
     
+    async def check_and_post_daily_events(self):
+        """Check each guild's posting time and post events for guilds whose time matches now"""
+        now_eastern = datetime.now(self.eastern_tz)
+        current_time = now_eastern.time().replace(second=0, microsecond=0)
+        
+        guilds_with_schedules = await database.get_all_guilds_with_schedules()
+        
+        for guild_id in guilds_with_schedules:
+            try:
+                guild = self.bot.get_guild(guild_id)
+                if not guild:
+                    continue
+                
+                # Get guild settings
+                guild_settings = await database.get_guild_settings(guild_id)
+                if not guild_settings or not guild_settings.get('event_channel_id'):
+                    continue
+                
+                # Get the posting time for this guild (default to 9:00 AM if not set)
+                post_time_str = guild_settings.get('post_time', '09:00:00')
+                try:
+                    guild_post_time = datetime.strptime(post_time_str, '%H:%M:%S').time()
+                except ValueError:
+                    # If there's an error parsing the time, default to 9 AM
+                    guild_post_time = datetime.strptime('09:00:00', '%H:%M:%S').time()
+                
+                # Check if current time matches this guild's posting time
+                if current_time.hour == guild_post_time.hour and current_time.minute == guild_post_time.minute:
+                    channel = guild.get_channel(guild_settings['event_channel_id'])
+                    if not channel:
+                        continue
+                    
+                    # Post today's event for this guild
+                    await self.post_todays_event(guild, channel)
+                    print(f"Posted daily event for guild {guild_id} at {post_time_str}")
+                
+            except Exception as e:
+                print(f"Error checking/posting daily event for guild {guild_id}: {e}")
+
     async def post_todays_event(self, guild: disnake.Guild, channel: disnake.TextChannel):
         """Post today's event to the specified channel"""
         guild_id = guild.id
@@ -1063,6 +1105,65 @@ class ScheduleCog(commands.Cog):
                 ephemeral=True
             )
     
+    @commands.slash_command(
+        name="set_posting_time",
+        description="Set the time when daily event posts are created (Eastern Time)"
+    )
+    async def set_posting_time(
+        self, 
+        inter: disnake.ApplicationCommandInteraction,
+        hour: int = commands.Param(description="Hour (0-23)", ge=0, le=23),
+        minute: int = commands.Param(description="Minute (0-59)", ge=0, le=59)
+    ):
+        """Set the posting time in Eastern Time"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        try:
+            guild_id = inter.guild.id
+            
+            # Validate time
+            if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+                await inter.response.send_message(
+                    "❌ **Invalid Time!**\n"
+                    "Hour must be 0-23 and minute must be 0-59.",
+                    ephemeral=True
+                )
+                return
+            
+            # Format time as HH:MM:SS
+            time_str = f"{hour:02d}:{minute:02d}:00"
+            
+            # Save to database
+            success = await database.save_guild_settings(guild_id, {"post_time": time_str})
+            
+            if success:
+                # Convert to 12-hour format for display
+                eastern_time = datetime.strptime(time_str, '%H:%M:%S').strftime('%I:%M %p')
+                await inter.response.send_message(
+                    f"✅ **Daily Posting Time Set!**\n"
+                    f"Daily event posts will be created at **{eastern_time} Eastern Time**\n"
+                    f"This is when the RSVP post appears in your event channel each day.",
+                    ephemeral=True
+                )
+            else:
+                await inter.response.send_message(
+                    "❌ Failed to save posting time. Please try again.",
+                    ephemeral=True
+                )
+                
+        except Exception as e:
+            await inter.response.send_message(
+                f"❌ **Error Setting Posting Time**\n"
+                f"An error occurred: {str(e)}",
+                ephemeral=True
+            )
+
     @commands.slash_command(
         name="configure_reminders",
         description="Configure reminder settings for events"
@@ -2475,6 +2576,23 @@ class ScheduleCog(commands.Cog):
                 name="⏰ Event Time",
                 value=f"**Time:** {display_time} Eastern Time\n"
                       f"**24-hour:** {event_time}",
+                inline=False
+            )
+            
+            # Posting Time Settings
+            post_time = guild_settings.get('post_time', '09:00:00')
+            try:
+                # Convert to 12-hour format for display
+                post_time_obj = datetime.strptime(post_time, '%H:%M:%S')
+                post_display_time = post_time_obj.strftime('%I:%M %p')
+            except:
+                post_display_time = post_time
+            
+            embed.add_field(
+                name="📅 Daily Posting Time",
+                value=f"**Time:** {post_display_time} Eastern Time\n"
+                      f"**24-hour:** {post_time}\n"
+                      f"**Note:** When daily RSVP posts are created",
                 inline=False
             )
             
