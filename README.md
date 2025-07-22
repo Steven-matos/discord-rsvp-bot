@@ -1,6 +1,10 @@
-# Discord RSVP Bot
-
-A friendly Discord bot that helps your community organize weekly events with easy RSVP tracking, automatic reminders, and support for mobile users. Perfect for gaming groups, clubs, or any community that meets regularly!
+<div align="center">
+  <img src="logo.png" alt="Discord RSVP Bot Logo" width="200" height="200">
+  
+  # Discord RSVP Bot
+  
+  A friendly Discord bot that helps your community organize weekly events with easy RSVP tracking, automatic reminders, and support for mobile users. Perfect for gaming groups, clubs, or any community that meets regularly!
+</div>
 
 ## ✨ What This Bot Does
 
