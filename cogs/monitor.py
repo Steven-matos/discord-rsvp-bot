@@ -21,6 +21,55 @@ class MonitorCog(commands.Cog):
         self.health_check_task.cancel()
         self.performance_monitor_task.cancel()
     
+    # DRY Helper Methods
+    def _calculate_uptime(self) -> str:
+        """Helper method to calculate and format uptime"""
+        if self.bot_start_time:
+            uptime_delta = datetime.now(timezone.utc) - self.bot_start_time
+            return str(uptime_delta).split('.')[0]  # Remove microseconds
+        return "Unknown"
+    
+    def _get_latency_ms(self) -> int:
+        """Helper method to get latency in milliseconds"""
+        return round(self.bot.latency * 1000)
+    
+    def _get_system_metrics(self) -> tuple:
+        """Helper method to get system resource metrics"""
+        try:
+            import psutil
+            process = psutil.Process()
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            cpu_percent = process.cpu_percent()
+            return memory_mb, cpu_percent
+        except ImportError:
+            return "N/A", "N/A"
+    
+    def _format_metric_value(self, value, unit: str = "") -> str:
+        """Helper method to format metric values consistently"""
+        if isinstance(value, float):
+            return f"{value:.1f}{unit}"
+        return str(value)
+    
+    def _check_bot_health_warnings(self) -> List[str]:
+        """Helper method to check for bot health warnings"""
+        warnings = []
+        if self.bot.latency > 1.0:
+            warnings.append("⚠️ High latency detected")
+        if len(self.bot.guilds) == 0:
+            warnings.append("⚠️ Bot not in any guilds")
+        if not self.bot.is_ready():
+            warnings.append("⚠️ Bot not ready")
+        return warnings
+    
+    def _create_status_embed(self, title: str, description: str) -> disnake.Embed:
+        """Helper method to create consistent status embeds"""
+        return disnake.Embed(
+            title=title,
+            description=description,
+            color=disnake.Color.green() if self.bot.is_ready() else disnake.Color.red(),
+            timestamp=datetime.now(timezone.utc)
+        )
+    
     @tasks.loop(minutes=5)  # Check every 5 minutes
     async def health_check_task(self):
         """Periodic health check to ensure bot is functioning properly"""
@@ -29,16 +78,18 @@ class MonitorCog(commands.Cog):
                 self.last_heartbeat = datetime.now(timezone.utc)
                 self.heartbeat_count += 1
                 
-                # Log health status
-                uptime = datetime.now(timezone.utc) - self.bot_start_time if self.bot_start_time else timedelta(0)
-                logger.info(f"Bot Health Check - Uptime: {uptime}, Guilds: {len(self.bot.guilds)}, Latency: {round(self.bot.latency * 1000)}ms")
+                # Log health status using helper methods
+                uptime = self._calculate_uptime()
+                latency_ms = self._get_latency_ms()
+                logger.info(f"Bot Health Check - Uptime: {uptime}, Guilds: {len(self.bot.guilds)}, Latency: {latency_ms}ms")
                 
-                # Check for potential issues
-                if self.bot.latency > 1.0:  # Latency over 1 second
-                    logger.warning(f"High latency detected: {round(self.bot.latency * 1000)}ms")
-                
-                if len(self.bot.guilds) == 0:
-                    logger.warning("Bot is not in any guilds")
+                # Check for potential issues using helper method
+                warnings = self._check_bot_health_warnings()
+                for warning in warnings:
+                    if "latency" in warning.lower():
+                        logger.warning(f"High latency detected: {latency_ms}ms")
+                    elif "guilds" in warning.lower():
+                        logger.warning("Bot is not in any guilds")
                     
             else:
                 logger.warning("Bot is not ready during health check")
@@ -55,13 +106,15 @@ class MonitorCog(commands.Cog):
         """Monitor bot performance and resource usage"""
         try:
             if self.bot.is_ready():
-                # Log performance metrics
-                logger.info(f"Performance Check - Guilds: {len(self.bot.guilds)}, Latency: {round(self.bot.latency * 1000)}ms")
+                # Log performance metrics using helper methods
+                latency_ms = self._get_latency_ms()
+                logger.info(f"Performance Check - Guilds: {len(self.bot.guilds)}, Latency: {latency_ms}ms")
                 
-                # Check if bot has been running for a while
+                # Check if bot has been running for a while using helper method
+                uptime = self._calculate_uptime()
                 if self.bot_start_time:
-                    uptime = datetime.now(timezone.utc) - self.bot_start_time
-                    if uptime.total_seconds() > 86400:  # 24 hours
+                    uptime_delta = datetime.now(timezone.utc) - self.bot_start_time
+                    if uptime_delta.total_seconds() > 86400:  # 24 hours
                         logger.info(f"Bot has been running for {uptime}")
                 
         except Exception as e:
@@ -84,28 +137,15 @@ class MonitorCog(commands.Cog):
     async def monitor_status(self, inter: disnake.ApplicationCommandInteraction):
         """Get detailed monitoring information"""
         try:
-            # Calculate uptime
-            uptime = "Unknown"
-            if self.bot_start_time:
-                uptime_delta = datetime.now(timezone.utc) - self.bot_start_time
-                uptime = str(uptime_delta).split('.')[0]  # Remove microseconds
+            # Get system metrics using helper methods
+            uptime = self._calculate_uptime()
+            latency_ms = self._get_latency_ms()
+            memory_mb, cpu_percent = self._get_system_metrics()
             
-            # Calculate memory usage (if available)
-            try:
-                import psutil
-                process = psutil.Process()
-                memory_mb = process.memory_info().rss / 1024 / 1024
-                cpu_percent = process.cpu_percent()
-            except ImportError:
-                memory_mb = "N/A"
-                cpu_percent = "N/A"
-            
-            # Create detailed status embed
-            embed = disnake.Embed(
-                title="🔍 Bot Monitoring Status",
-                description="Detailed monitoring information",
-                color=disnake.Color.blue(),
-                timestamp=datetime.now(timezone.utc)
+            # Create detailed status embed using helper method
+            embed = self._create_status_embed(
+                "🔍 Bot Monitoring Status",
+                "Detailed monitoring information"
             )
             
             # Basic status
@@ -127,22 +167,22 @@ class MonitorCog(commands.Cog):
                 inline=True
             )
             
-            # Performance metrics
+            # Performance metrics using helper methods
             embed.add_field(
                 name="🌐 Latency",
-                value=f"{round(self.bot.latency * 1000)}ms",
+                value=f"{latency_ms}ms",
                 inline=True
             )
             
             embed.add_field(
                 name="💾 Memory",
-                value=f"{memory_mb:.1f} MB" if isinstance(memory_mb, float) else memory_mb,
+                value=self._format_metric_value(memory_mb, " MB"),
                 inline=True
             )
             
             embed.add_field(
                 name="🖥️ CPU",
-                value=f"{cpu_percent:.1f}%" if isinstance(cpu_percent, float) else cpu_percent,
+                value=self._format_metric_value(cpu_percent, "%"),
                 inline=True
             )
             
@@ -165,15 +205,8 @@ class MonitorCog(commands.Cog):
                 inline=True
             )
             
-            # Add warnings if any issues detected
-            warnings = []
-            if self.bot.latency > 1.0:
-                warnings.append("⚠️ High latency detected")
-            if len(self.bot.guilds) == 0:
-                warnings.append("⚠️ Bot not in any guilds")
-            if not self.bot.is_ready():
-                warnings.append("⚠️ Bot not ready")
-            
+            # Add warnings if any issues detected using helper method
+            warnings = self._check_bot_health_warnings()
             if warnings:
                 embed.add_field(
                     name="⚠️ Warnings",
@@ -217,8 +250,8 @@ class MonitorCog(commands.Cog):
             except Exception as e:
                 results.append(f"❌ Database connection: FAILED - {str(e)}")
             
-            # Test latency
-            latency_ms = round(self.bot.latency * 1000)
+            # Test latency using helper method
+            latency_ms = self._get_latency_ms()
             if latency_ms < 100:
                 results.append(f"✅ Latency: {latency_ms}ms (Good)")
             elif latency_ms < 500:
@@ -226,10 +259,12 @@ class MonitorCog(commands.Cog):
             else:
                 results.append(f"❌ Latency: {latency_ms}ms (Poor)")
             
+            # Create embed using helper method with dynamic color
+            description = "\n".join(results)
             embed = disnake.Embed(
                 title="🔧 Connection Test Results",
-                description="\n".join(results),
-                color=disnake.Color.green() if "❌" not in "\n".join(results) else disnake.Color.red(),
+                description=description,
+                color=disnake.Color.green() if "❌" not in description else disnake.Color.red(),
                 timestamp=datetime.now(timezone.utc)
             )
             

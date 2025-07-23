@@ -158,6 +158,105 @@ def execute_supabase_query(query_func, operation_name: str, default_return=None)
         print(f"Unexpected error during {operation_name}: {e}")
         return default_return
 
+# DRY Helper Methods
+def _handle_database_operation(operation_func, operation_name: str, default_return=None):
+    """
+    Helper method to standardize database operation error handling.
+    
+    Args:
+        operation_func: Function that performs the database operation  
+        operation_name: Description of the operation for error messages
+        default_return: Value to return if operation fails
+    
+    Returns:
+        Operation result or default_return if operation fails
+    """
+    try:
+        return operation_func()
+    except Exception as e:
+        print(f"Error {operation_name}: {e}")
+        return default_return
+
+def _parse_event_data_json(data_list: List[dict]) -> List[dict]:
+    """
+    Helper method to parse event_data JSON in database results.
+    
+    Args:
+        data_list: List of database records that may contain event_data JSON
+        
+    Returns:
+        List with parsed event_data fields
+    """
+    for item in data_list:
+        if 'event_data' in item and item['event_data']:
+            try:
+                item['event_data'] = json.loads(item['event_data'])
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, leave as is
+                pass
+    return data_list
+
+def _perform_upsert_operation(table_name: str, guild_id: int, data: dict, id_field: str = 'guild_id') -> bool:
+    """
+    Helper method to perform upsert operations (check if exists, update or insert).
+    
+    Args:
+        table_name: Name of the database table
+        guild_id: Guild ID to check for existing records
+        data: Data to insert or update
+        id_field: Field name to use for checking existence
+        
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        client = get_supabase_client()
+        
+        # Check if record already exists
+        existing_result = client.table(table_name).select(id_field).eq(id_field, guild_id).execute()
+        
+        if existing_result.data:
+            # Update existing record
+            if 'updated_at' not in data:
+                data['updated_at'] = 'now()'
+            result = client.table(table_name).update(data).eq(id_field, guild_id).execute()
+        else:
+            # Create new record
+            if id_field not in data:
+                data[id_field] = guild_id
+            result = client.table(table_name).insert(data).execute()
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error in upsert operation for table {table_name}, guild {guild_id}: {e}")
+        return False
+
+def _check_record_exists(table_name: str, conditions: dict) -> bool:
+    """
+    Helper method to check if a record exists with given conditions.
+    
+    Args:
+        table_name: Name of the database table
+        conditions: Dictionary of field->value conditions
+        
+    Returns:
+        True if record exists, False otherwise
+    """
+    try:
+        client = get_supabase_client()
+        query = client.table(table_name).select('id')
+        
+        for field, value in conditions.items():
+            query = query.eq(field, value)
+        
+        result = query.execute()
+        return len(result.data) > 0
+        
+    except Exception as e:
+        print(f"Error checking record existence in {table_name}: {e}")
+        return False
+
 async def save_day_data(guild_id: int, day: str, data: dict) -> bool:
     """
     Save day data for a guild's weekly schedule.
@@ -205,9 +304,8 @@ async def get_guild_schedule(guild_id: int) -> dict:
     Returns:
         Dictionary containing all day data, empty dict if no schedule found
     """
-    try:
+    def operation():
         client = get_supabase_client()
-        
         result = client.table('weekly_schedules').select('*').eq('guild_id', guild_id).execute()
         
         if not result.data:
@@ -225,10 +323,8 @@ async def get_guild_schedule(guild_id: int) -> dict:
                 schedule_data[day] = json.loads(row[day_column])
         
         return schedule_data
-        
-    except Exception as e:
-        print(f"Error getting guild schedule for guild {guild_id}: {e}")
-        return {}
+    
+    return _handle_database_operation(operation, f"getting guild schedule for guild {guild_id}", {})
 
 async def get_all_guilds_with_schedules() -> List[int]:
     """
@@ -237,19 +333,16 @@ async def get_all_guilds_with_schedules() -> List[int]:
     Returns:
         List of guild IDs
     """
-    try:
+    def operation():
         client = get_supabase_client()
-        
         result = client.table('weekly_schedules').select('guild_id').execute()
         
         if not result.data:
             return []
         
         return [row['guild_id'] for row in result.data]
-        
-    except Exception as e:
-        print(f"Error getting guilds with schedules: {e}")
-        return []
+    
+    return _handle_database_operation(operation, "getting guilds with schedules", [])
 
 async def save_guild_settings(guild_id: int, settings: dict) -> bool:
     """
@@ -305,19 +398,16 @@ async def get_guild_settings(guild_id: int) -> dict:
     Returns:
         Dictionary containing guild settings, empty dict if not found
     """
-    try:
+    def operation():
         client = get_supabase_client()
-        
         result = client.table('guild_settings').select('*').eq('guild_id', guild_id).execute()
         
         if not result.data:
             return {}
         
         return result.data[0]
-        
-    except Exception as e:
-        print(f"Error getting guild settings for guild {guild_id}: {e}")
-        return {}
+    
+    return _handle_database_operation(operation, f"getting guild settings for guild {guild_id}", {})
 
 async def get_schedule_last_updated(guild_id: int) -> Optional[datetime]:
     """
@@ -390,16 +480,11 @@ async def check_admin_notification_sent(guild_id: int, notification_date: date) 
     Returns:
         True if notification was sent, False otherwise
     """
-    try:
-        client = get_supabase_client()
-        
-        result = client.table('admin_notifications').select('id').eq('guild_id', guild_id).eq('notification_date', notification_date.isoformat()).execute()
-        
-        return len(result.data) > 0
-        
-    except Exception as e:
-        print(f"Error checking admin notification for guild {guild_id}: {e}")
-        return False
+    conditions = {
+        'guild_id': guild_id,
+        'notification_date': notification_date.isoformat()
+    }
+    return _check_record_exists('admin_notifications', conditions)
 
 async def save_daily_post(guild_id: int, channel_id: int, message_id: int, event_date: date, day_of_week: str, event_data: dict) -> Optional[str]:
     """
@@ -450,23 +535,18 @@ async def get_daily_post(guild_id: int, event_date: date) -> Optional[dict]:
     Returns:
         Post data dictionary or None if not found
     """
-    try:
+    def operation():
         client = get_supabase_client()
-        
         result = client.table('daily_posts').select('*').eq('guild_id', guild_id).eq('event_date', event_date.isoformat()).execute()
         
         if not result.data:
             return None
         
-        post_data = result.data[0]
-        # Parse the event_data JSON
-        post_data['event_data'] = json.loads(post_data['event_data'])
-        
-        return post_data
-        
-    except Exception as e:
-        print(f"Error getting daily post for guild {guild_id}, date {event_date}: {e}")
-        return None
+        # Use helper method to parse event_data JSON
+        _parse_event_data_json(result.data)
+        return result.data[0]
+    
+    return _handle_database_operation(operation, f"getting daily post for guild {guild_id}, date {event_date}", None)
 
 async def get_all_daily_posts_for_date(guild_id: int, event_date: date) -> List[dict]:
     """
@@ -479,23 +559,17 @@ async def get_all_daily_posts_for_date(guild_id: int, event_date: date) -> List[
     Returns:
         List of post data dictionaries
     """
-    try:
+    def operation():
         client = get_supabase_client()
-        
         result = client.table('daily_posts').select('*').eq('guild_id', guild_id).eq('event_date', event_date.isoformat()).execute()
         
         if not result.data:
             return []
         
-        # Parse the event_data JSON for all posts
-        for post_data in result.data:
-            post_data['event_data'] = json.loads(post_data['event_data'])
-        
-        return result.data
-        
-    except Exception as e:
-        print(f"Error getting all daily posts for guild {guild_id}, date {event_date}: {e}")
-        return []
+        # Use helper method to parse event_data JSON for all posts
+        return _parse_event_data_json(result.data)
+    
+    return _handle_database_operation(operation, f"getting all daily posts for guild {guild_id}, date {event_date}", [])
 
 async def get_aggregated_rsvp_responses_for_date(guild_id: int, event_date: date) -> List[dict]:
     """
@@ -589,19 +663,16 @@ async def get_rsvp_responses(post_id: str) -> List[dict]:
     Returns:
         List of RSVP response dictionaries
     """
-    try:
+    def operation():
         client = get_supabase_client()
-        
         result = client.table('rsvp_responses').select('*').eq('post_id', post_id).execute()
         
         if not result.data:
             return []
         
         return result.data
-        
-    except Exception as e:
-        print(f"Error getting RSVP responses for post {post_id}: {e}")
-        return []
+    
+    return _handle_database_operation(operation, f"getting RSVP responses for post {post_id}", [])
 
 async def save_reminder_sent(post_id: str, guild_id: int, reminder_type: str, event_date: date) -> bool:
     """
@@ -645,16 +716,11 @@ async def check_reminder_sent(post_id: str, reminder_type: str) -> bool:
     Returns:
         True if reminder was already sent, False otherwise
     """
-    try:
-        client = get_supabase_client()
-        
-        result = client.table('reminder_sends').select('id').eq('post_id', post_id).eq('reminder_type', reminder_type).execute()
-        
-        return len(result.data) > 0
-        
-    except Exception as e:
-        print(f"Error checking reminder sent for post {post_id}, type {reminder_type}: {e}")
-        return False
+    conditions = {
+        'post_id': post_id,
+        'reminder_type': reminder_type
+    }
+    return _check_record_exists('reminder_sends', conditions)
 
 async def get_guilds_needing_reminders() -> List[dict]:
     """
@@ -714,24 +780,17 @@ async def get_old_daily_posts(cutoff_date: date) -> List[dict]:
     Returns:
         List of post data dictionaries
     """
-    try:
+    def operation():
         client = get_supabase_client()
-        
         result = client.table('daily_posts').select('*').lt('event_date', cutoff_date.isoformat()).execute()
         
         if not result.data:
             return []
         
-        # Parse event_data JSON for each post
-        for post in result.data:
-            if 'event_data' in post:
-                post['event_data'] = json.loads(post['event_data'])
-        
-        return result.data
-        
-    except Exception as e:
-        print(f"Error getting old daily posts before {cutoff_date}: {e}")
-        return []
+        # Use helper method to parse event_data JSON for each post
+        return _parse_event_data_json(result.data)
+    
+    return _handle_database_operation(operation, f"getting old daily posts before {cutoff_date}", [])
 
 async def delete_daily_post(post_id: str) -> bool:
     """
@@ -762,9 +821,8 @@ async def get_all_guilds_with_daily_posts() -> List[int]:
     Returns:
         List of guild IDs
     """
-    try:
+    def operation():
         client = get_supabase_client()
-        
         result = client.table('daily_posts').select('guild_id').execute()
         
         if not result.data:
@@ -772,9 +830,6 @@ async def get_all_guilds_with_daily_posts() -> List[int]:
         
         # Extract unique guild IDs
         guild_ids = list(set(post['guild_id'] for post in result.data))
-        
         return guild_ids
-        
-    except Exception as e:
-        print(f"Error getting guilds with daily posts: {e}")
-        return []
+    
+    return _handle_database_operation(operation, "getting guilds with daily posts", [])

@@ -33,6 +33,34 @@ bot_start_time = None
 reconnect_attempts = 0
 MAX_RECONNECT_ATTEMPTS = 5
 
+# DRY Helper Methods
+def _calculate_uptime() -> str:
+    """Helper method to calculate and format bot uptime"""
+    if bot_start_time:
+        uptime = datetime.now(timezone.utc) - bot_start_time
+        return str(uptime).split('.')[0]  # Remove microseconds
+    return "Unknown"
+
+def _get_bot_latency_ms() -> int:
+    """Helper method to get bot latency in milliseconds"""
+    return round(bot.latency * 1000)
+
+def _create_status_embed(title: str, description: str) -> disnake.Embed:
+    """Helper method to create consistent status embeds"""
+    return disnake.Embed(
+        title=title,
+        description=description,
+        color=disnake.Color.green() if bot.is_ready() else disnake.Color.red()
+    )
+
+async def _handle_database_operation_async(operation_name: str, operation_func):
+    """Helper method to handle async database operations with consistent error handling"""
+    try:
+        await operation_func()
+        logger.info(f"{operation_name} successfully")
+    except Exception as e:
+        logger.error(f"Failed to {operation_name.lower()}: {e}")
+
 
 
 @bot.event
@@ -43,11 +71,8 @@ async def on_disconnect():
     logger.warning(f"Bot disconnected! Attempt #{reconnect_attempts}")
     logger.info("Closing database pool...")
     
-    try:
-        await database.close_db_pool()
-        logger.info("Database pool closed successfully")
-    except Exception as e:
-        logger.error(f"Error closing database pool: {e}")
+    # Close database pool using helper method
+    await _handle_database_operation_async("Close database pool", database.close_db_pool)
 
 @bot.event
 async def on_connect():
@@ -66,13 +91,14 @@ async def on_resumed():
 async def bot_status(inter: disnake.ApplicationCommandInteraction):
     """Check bot status and uptime"""
     if bot_start_time:
-        uptime = datetime.now(timezone.utc) - bot_start_time
-        uptime_str = str(uptime).split('.')[0]  # Remove microseconds
+        # Use helper methods to get status info
+        uptime_str = _calculate_uptime()
+        latency_ms = _get_bot_latency_ms()
         
-        embed = disnake.Embed(
-            title="🤖 Bot Status",
-            description="Current bot status and information",
-            color=disnake.Color.green() if bot.is_ready() else disnake.Color.red()
+        # Create embed using helper method
+        embed = _create_status_embed(
+            "🤖 Bot Status",
+            "Current bot status and information"
         )
         
         embed.add_field(
@@ -95,7 +121,7 @@ async def bot_status(inter: disnake.ApplicationCommandInteraction):
         
         embed.add_field(
             name="Latency",
-            value=f"{round(bot.latency * 1000)}ms",
+            value=f"{latency_ms}ms",
             inline=True
         )
         
@@ -166,7 +192,8 @@ async def heartbeat():
     while True:
         try:
             if bot.is_ready():
-                logger.info(f"Bot heartbeat - Uptime: {datetime.now(timezone.utc) - bot_start_time if bot_start_time else 'Unknown'}")
+                uptime = _calculate_uptime()
+                logger.info(f"Bot heartbeat - Uptime: {uptime}")
             await asyncio.sleep(300)  # Log every 5 minutes
         except Exception as e:
             logger.error(f"Error in heartbeat: {e}")
@@ -183,12 +210,8 @@ async def on_ready():
     logger.info(f'Connected to {len(bot.guilds)} guilds')
     logger.info(f'Bot started at: {bot_start_time}')
     
-    # Initialize database connection pool
-    try:
-        await database.init_db_pool()
-        logger.info("Database connection pool initialized successfully!")
-    except Exception as e:
-        logger.error(f"Failed to initialize database pool: {e}")
+    # Initialize database connection pool using helper method
+    await _handle_database_operation_async("Initialize database connection pool", database.init_db_pool)
     
     # Load persistent views for RSVP buttons
     await load_persistent_views()

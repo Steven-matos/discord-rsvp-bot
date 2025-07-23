@@ -7,6 +7,7 @@ import calendar
 import pytz
 import functools
 import os
+import traceback
 
 # Specific user IDs that have access to all admin commands
 ADMIN_USER_IDS = [300157754012860425, 1354616827380236409]
@@ -207,6 +208,12 @@ class ScheduleCog(commands.Cog):
         # Eastern timezone for event times
         self.eastern_tz = pytz.timezone('America/New_York')
         
+        # Track last posting time per guild to prevent duplicates
+        self.last_posted_times = {}  # guild_id -> datetime
+        
+        # Track last reminder times per guild to prevent duplicates
+        self.last_reminder_times = {}  # (guild_id, reminder_type) -> datetime
+        
         # Start the daily posting task
         self.daily_posting_task.start()
         # Start the reminder checking task
@@ -219,30 +226,103 @@ class ScheduleCog(commands.Cog):
         self.reminder_check_task.cancel()
         self.cleanup_old_posts_task.cancel()
     
+    # DRY Helper Methods
+    def _log_with_prefix(self, prefix: str, message: str):
+        """Helper method to standardize logging with prefixes"""
+        print(f"[{prefix}] {message}")
+    
+    async def _validate_guild_and_channel(self, guild_id: int, log_prefix: str = "SYSTEM") -> tuple:
+        """
+        Helper method to validate guild and channel existence.
+        Returns: (guild, channel, guild_settings) or (None, None, None) if validation fails
+        """
+        # Get guild
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            self._log_with_prefix(log_prefix, f"Guild {guild_id} not found, skipping")
+            return None, None, None
+        
+        # Get guild settings
+        guild_settings = await database.get_guild_settings(guild_id)
+        if not guild_settings or not guild_settings.get('event_channel_id'):
+            self._log_with_prefix(log_prefix, f"Guild {guild_id} has no event channel configured, skipping")
+            return guild, None, guild_settings
+        
+        # Get channel
+        channel = guild.get_channel(guild_settings['event_channel_id'])
+        if not channel:
+            self._log_with_prefix(log_prefix, f"Guild {guild_id} event channel not found, skipping")
+            return guild, None, guild_settings
+        
+        return guild, channel, guild_settings
+    
+    def _check_duplicate_prevention(self, tracking_dict: dict, key, current_minute_key: datetime, log_prefix: str, action_name: str) -> bool:
+        """
+        Helper method to check duplicate prevention.
+        Returns: True if should skip (duplicate detected), False if should proceed
+        """
+        last_sent = tracking_dict.get(key)
+        if last_sent and last_sent >= current_minute_key:
+            self._log_with_prefix(log_prefix, f"Already performed {action_name} in this minute ({last_sent}), skipping")
+            return True
+        return False
+    
+    def _format_time_display(self, event_datetime_eastern: datetime, event_datetime_utc: datetime) -> tuple:
+        """Helper method to format time displays consistently"""
+        eastern_time_display = event_datetime_eastern.strftime("%I:%M %p ET")
+        utc_time_display = event_datetime_utc.strftime("%I:%M %p UTC")
+        return eastern_time_display, utc_time_display
+    
+    async def _check_bot_permissions(self, channel: disnake.TextChannel, guild_id: int, log_prefix: str = "SYSTEM") -> bool:
+        """
+        Helper method to check bot permissions in a channel.
+        Returns: True if permissions are sufficient, False otherwise
+        """
+        bot_member = channel.guild.get_member(self.bot.user.id)
+        if not bot_member:
+            self._log_with_prefix(log_prefix, f"Bot member not found in guild {guild_id}")
+            return False
+        
+        if not channel.permissions_for(bot_member).send_messages:
+            self._log_with_prefix(log_prefix, f"Bot doesn't have permission to send messages in channel {channel.id} for guild {guild_id}")
+            return False
+        
+        if not channel.permissions_for(bot_member).embed_links:
+            self._log_with_prefix(log_prefix, f"Bot doesn't have permission to embed links in channel {channel.id} for guild {guild_id}")
+            return False
+        
+        return True
+    
     @tasks.loop(minutes=1)  # Check every minute
     async def daily_posting_task(self):
         """Check if it's time to post daily events for each guild based on their posting time"""
-        now_eastern = datetime.now(self.eastern_tz)
-        
-        # Only check at the top of each minute to avoid multiple posts
-        if now_eastern.second != 0:
-            return
-        
-        # Get all guilds with schedules and check their posting times
-        await self.check_and_post_daily_events()
+        try:
+            now_eastern = datetime.now(self.eastern_tz)
+            
+            self._log_with_prefix("TASK", f"Daily posting task running at {now_eastern.strftime('%H:%M:%S')} Eastern (seconds: {now_eastern.second})")
+            
+            # Always call the posting check - let the check function handle duplicate prevention
+            self._log_with_prefix("TASK", "Calling check_and_post_daily_events()")
+            
+            # Get all guilds with schedules and check their posting times
+            await self.check_and_post_daily_events()
+            
+        except Exception as e:
+            print(f"[TASK] Error in daily_posting_task: {e}")
+            traceback.print_exc()
     
     @daily_posting_task.before_loop
     async def before_daily_posting(self):
         await self.bot.wait_until_ready()
     
-    @tasks.loop(minutes=1)  # Check every minute
+    @tasks.loop(minutes=5)  # Check every 5 minutes instead of every minute
     async def reminder_check_task(self):
         """Check if it's time to send reminders for events"""
         now_eastern = datetime.now(self.eastern_tz)
         
-        # Only check at specific minutes to avoid spam
-        if now_eastern.minute % 5 == 0:  # Check every 5 minutes
-            await self.check_and_send_reminders()
+        # Now that we run every 5 minutes, always check
+        print(f"[REMINDER] Checking reminders at {now_eastern.strftime('%H:%M:%S')} Eastern")
+        await self.check_and_send_reminders()
     
     @reminder_check_task.before_loop
     async def before_reminder_check(self):
@@ -260,6 +340,8 @@ class ScheduleCog(commands.Cog):
             
             if not old_posts:
                 return  # No old posts to clean up
+            
+            print(f"[RATE-LIMIT] Cleanup task processing {len(old_posts)} old posts")
             
             deleted_count = 0
             failed_count = 0
@@ -290,6 +372,10 @@ class ScheduleCog(commands.Cog):
                         await message.delete()
                         print(f"Deleted old event message {message_id} from guild {guild_id}")
                         deleted_count += 1
+                        
+                        # Add rate limiting delay after each Discord API call
+                        await asyncio.sleep(0.5)  # 500ms delay between deletions
+                        
                     except disnake.NotFound:
                         # Message already deleted or not found
                         print(f"Message {message_id} not found in guild {guild_id}, already cleaned up")
@@ -348,17 +434,22 @@ class ScheduleCog(commands.Cog):
         now_eastern = datetime.now(self.eastern_tz)
         current_time = now_eastern.time().replace(second=0, microsecond=0)
         
+        self._log_with_prefix("AUTO-POST", f"Checking at {now_eastern.strftime('%H:%M:%S')} Eastern")
+        
         guilds_with_schedules = await database.get_all_guilds_with_schedules()
+        self._log_with_prefix("AUTO-POST", f"Found {len(guilds_with_schedules)} guilds with schedules")
         
         for guild_id in guilds_with_schedules:
             try:
                 guild = self.bot.get_guild(guild_id)
                 if not guild:
+                    self._log_with_prefix("AUTO-POST", f"Guild {guild_id} not found, skipping")
                     continue
                 
                 # Get guild settings
                 guild_settings = await database.get_guild_settings(guild_id)
                 if not guild_settings or not guild_settings.get('event_channel_id'):
+                    self._log_with_prefix("AUTO-POST", f"Guild {guild_id} has no event channel, skipping")
                     continue
                 
                 # Get the posting time for this guild (default to 9:00 AM if not set)
@@ -369,19 +460,44 @@ class ScheduleCog(commands.Cog):
                     # If there's an error parsing the time, default to 9 AM
                     guild_post_time = datetime.strptime('09:00:00', '%H:%M:%S').time()
                 
+                self._log_with_prefix("AUTO-POST", f"Guild {guild_id} posting time: {post_time_str}, current time: {current_time}")
+                
                 # Check if current time matches this guild's posting time
                 if current_time.hour == guild_post_time.hour and current_time.minute == guild_post_time.minute:
+                    self._log_with_prefix("AUTO-POST", f"Time match for guild {guild_id}! Attempting to post...")
+                    
+                    # Check if we already posted in this minute to prevent duplicates
+                    current_minute_key = now_eastern.replace(second=0, microsecond=0)
+                    if self._check_duplicate_prevention(self.last_posted_times, guild_id, current_minute_key, "AUTO-POST", f"daily post for guild {guild_id}"):
+                        continue
+                    
+                    # Check if we already posted today to prevent duplicates
+                    today = now_eastern.date()
+                    existing_post = await database.get_daily_post(guild_id, today)
+                    
+                    if existing_post:
+                        self._log_with_prefix("AUTO-POST", f"Guild {guild_id} already has a post for today, skipping")
+                        continue
+                    
                     channel = guild.get_channel(guild_settings['event_channel_id'])
                     if not channel:
+                        self._log_with_prefix("AUTO-POST", f"Guild {guild_id} event channel not found, skipping")
                         continue
                     
                     # Post today's event for this guild
                     await self.post_todays_event(guild, channel)
-                    print(f"Posted daily event for guild {guild_id} at {post_time_str}")
+                    
+                    # Update the last posted time
+                    self.last_posted_times[guild_id] = current_minute_key
+                    
+                    self._log_with_prefix("AUTO-POST", f"Successfully posted daily event for guild {guild_id} at {post_time_str}")
+                else:
+                    self._log_with_prefix("AUTO-POST", f"No time match for guild {guild_id}: {current_time} vs {guild_post_time}")
                 
             except Exception as e:
-                print(f"Error checking/posting daily event for guild {guild_id}: {e}")
-
+                print(f"[AUTO-POST] Error checking/posting daily event for guild {guild_id}: {e}")
+                traceback.print_exc()
+    
     async def post_todays_event(self, guild: disnake.Guild, channel: disnake.TextChannel):
         """Post today's event to the specified channel"""
         guild_id = guild.id
@@ -426,8 +542,7 @@ class ScheduleCog(commands.Cog):
         event_datetime_utc = event_datetime_eastern.astimezone(timezone.utc)
         
         # Format times for display
-        eastern_time_display = event_datetime_eastern.strftime("%I:%M %p ET")
-        utc_time_display = event_datetime_utc.strftime("%I:%M %p UTC")
+        eastern_time_display, utc_time_display = self._format_time_display(event_datetime_eastern, event_datetime_utc)
         
         # Create embed for the event
         embed = disnake.Embed(
@@ -467,19 +582,7 @@ class ScheduleCog(commands.Cog):
         view = RSVPView("temp_id", guild_id)  # We'll update this with the real post ID
         
         # Check bot permissions in the channel
-        bot_member = guild.get_member(self.bot.user.id)
-        if not bot_member:
-            print(f"Bot member not found in guild {guild_id}")
-            return
-        
-        # Check if bot has permission to send messages in this channel
-        if not channel.permissions_for(bot_member).send_messages:
-            print(f"Bot doesn't have permission to send messages in channel {channel.id} for guild {guild_id}")
-            return
-        
-        # Check if bot has permission to embed links (needed for embeds)
-        if not channel.permissions_for(bot_member).embed_links:
-            print(f"Bot doesn't have permission to embed links in channel {channel.id} for guild {guild_id}")
+        if not await self._check_bot_permissions(channel, guild_id, "AUTO-POST"):
             return
         
         try:
@@ -629,8 +732,12 @@ class ScheduleCog(commands.Cog):
     async def check_and_send_reminders(self):
         """Check all guilds and send reminders if needed"""
         try:
+            now_eastern = datetime.now(self.eastern_tz)
+            print(f"[REMINDER] Checking reminders at {now_eastern.strftime('%H:%M:%S')} Eastern")
+            
             # Get all guilds with reminder settings
             guilds_data = await database.get_guilds_needing_reminders()
+            print(f"[REMINDER] Found {len(guilds_data)} guilds with reminder settings")
             
             for guild_data in guilds_data:
                 guild_id = guild_data['guild_id']
@@ -638,6 +745,7 @@ class ScheduleCog(commands.Cog):
                 
                 # Skip if reminders are disabled
                 if not settings.get('reminder_enabled', True):
+                    print(f"[REMINDER] Guild {guild_id} has reminders disabled, skipping")
                     continue
                 
                 # Get today's event (using Eastern time to determine the day)
@@ -645,13 +753,15 @@ class ScheduleCog(commands.Cog):
                 post_data = await database.get_daily_post(guild_id, today)
                 
                 if not post_data:
+                    print(f"[REMINDER] Guild {guild_id} has no event today, skipping")
                     continue  # No event today
                 
                 # Check if we need to send reminders
                 await self.check_guild_reminders(guild_id, post_data, settings)
                 
         except Exception as e:
-            print(f"Error in check_and_send_reminders: {e}")
+            print(f"[REMINDER] Error in check_and_send_reminders: {e}")
+            traceback.print_exc()
     
     async def check_guild_reminders(self, guild_id: int, post_data: dict, settings: dict):
         """Check and send reminders for a specific guild"""
@@ -663,6 +773,8 @@ class ScheduleCog(commands.Cog):
             # Create event datetime in Eastern time
             today = datetime.now(self.eastern_tz).date()
             eastern_now = datetime.now(self.eastern_tz)
+            current_minute_key = eastern_now.replace(second=0, microsecond=0)
+            
             event_datetime_eastern = eastern_now.replace(
                 year=today.year, 
                 month=today.month, 
@@ -676,24 +788,51 @@ class ScheduleCog(commands.Cog):
             # Convert to UTC for comparison
             event_datetime_utc = event_datetime_eastern.astimezone(timezone.utc)
             
+            print(f"[REMINDER] Checking reminders for guild {guild_id} at {eastern_now.strftime('%H:%M:%S')} Eastern")
+            print(f"[REMINDER] Event time: {event_time_str}, Current time: {eastern_now.strftime('%H:%M:%S')}")
+            
             # Check for 4:00 PM Eastern reminder
             if (settings.get('reminder_enabled', True) and 
                 settings.get('reminder_4pm', True) and
-                eastern_now.hour == 16 and eastern_now.minute == 0 and  # 4:00 PM Eastern
-                not await database.check_reminder_sent(post_data['id'], '4pm')):
-                await self.send_reminder(guild_id, post_data, '4pm', event_datetime_utc)
+                eastern_now.hour == 16 and eastern_now.minute == 0):  # 4:00 PM Eastern
+                
+                reminder_key = (guild_id, '4pm')
+                if self._check_duplicate_prevention(self.last_reminder_times, reminder_key, current_minute_key, "REMINDER", f"4pm reminder for guild {guild_id}"):
+                    pass  # Skip due to duplicate prevention
+                elif await database.check_reminder_sent(post_data['id'], '4pm'):
+                    self._log_with_prefix("REMINDER", f"Guild {guild_id} 4pm reminder already sent in database, skipping")
+                else:
+                    self._log_with_prefix("REMINDER", f"Sending 4pm reminder for guild {guild_id}")
+                    await self.send_reminder(guild_id, post_data, '4pm', event_datetime_utc)
+                    self.last_reminder_times[reminder_key] = current_minute_key
             
             # Check for 1 hour before event reminder
-            elif (settings.get('reminder_1_hour', True) and 
-                  eastern_now.hour == event_time.hour - 1 and eastern_now.minute == 0 and  # 1 hour before
-                  not await database.check_reminder_sent(post_data['id'], '1_hour')):
-                await self.send_reminder(guild_id, post_data, '1_hour', event_datetime_utc)
+            if (settings.get('reminder_1_hour', True) and 
+                eastern_now.hour == event_time.hour - 1 and eastern_now.minute == 0):  # 1 hour before
+                
+                reminder_key = (guild_id, '1_hour')
+                if self._check_duplicate_prevention(self.last_reminder_times, reminder_key, current_minute_key, "REMINDER", f"1_hour reminder for guild {guild_id}"):
+                    pass  # Skip due to duplicate prevention
+                elif await database.check_reminder_sent(post_data['id'], '1_hour'):
+                    self._log_with_prefix("REMINDER", f"Guild {guild_id} 1_hour reminder already sent in database, skipping")
+                else:
+                    self._log_with_prefix("REMINDER", f"Sending 1_hour reminder for guild {guild_id}")
+                    await self.send_reminder(guild_id, post_data, '1_hour', event_datetime_utc)
+                    self.last_reminder_times[reminder_key] = current_minute_key
             
             # Check for 15 minutes before event reminder
-            elif (settings.get('reminder_15_minutes', True) and 
-                  eastern_now.hour == event_time.hour and eastern_now.minute == event_time.minute - 15 and  # 15 minutes before
-                  not await database.check_reminder_sent(post_data['id'], '15_minutes')):
-                await self.send_reminder(guild_id, post_data, '15_minutes', event_datetime_utc)
+            if (settings.get('reminder_15_minutes', True) and 
+                eastern_now.hour == event_time.hour and eastern_now.minute == event_time.minute - 15):  # 15 minutes before
+                
+                reminder_key = (guild_id, '15_minutes')
+                if self._check_duplicate_prevention(self.last_reminder_times, reminder_key, current_minute_key, "REMINDER", f"15_minutes reminder for guild {guild_id}"):
+                    pass  # Skip due to duplicate prevention
+                elif await database.check_reminder_sent(post_data['id'], '15_minutes'):
+                    self._log_with_prefix("REMINDER", f"Guild {guild_id} 15_minutes reminder already sent in database, skipping")
+                else:
+                    self._log_with_prefix("REMINDER", f"Sending 15_minutes reminder for guild {guild_id}")
+                    await self.send_reminder(guild_id, post_data, '15_minutes', event_datetime_utc)
+                    self.last_reminder_times[reminder_key] = current_minute_key
                 
         except Exception as e:
             print(f"Error checking reminders for guild {guild_id}: {e}")
@@ -701,17 +840,10 @@ class ScheduleCog(commands.Cog):
     async def send_reminder(self, guild_id: int, post_data: dict, reminder_type: str, event_datetime_utc: datetime):
         """Send a reminder for an event"""
         try:
-            guild = self.bot.get_guild(guild_id)
-            if not guild:
-                return
+            self._log_with_prefix("REMINDER", f"Attempting to send {reminder_type} reminder for guild {guild_id}")
             
-            # Get guild settings
-            guild_settings = await database.get_guild_settings(guild_id)
-            if not guild_settings or not guild_settings.get('event_channel_id'):
-                return
-            
-            channel = guild.get_channel(guild_settings['event_channel_id'])
-            if not channel:
+            guild, channel, guild_settings = await self._validate_guild_and_channel(guild_id, "REMINDER")
+            if not guild or not channel:
                 return
             
             # Create reminder embed
@@ -719,19 +851,20 @@ class ScheduleCog(commands.Cog):
             
             # Send reminder
             await channel.send("@everyone", embed=embed)
+            self._log_with_prefix("REMINDER", f"Successfully sent {reminder_type} reminder to channel {channel.id} for guild {guild_id}")
             
-            # Mark reminder as sent
+            # Mark reminder as sent in database
             await database.save_reminder_sent(
                 post_data['id'], 
                 guild_id, 
                 reminder_type, 
                 post_data['event_date']
             )
-            
-            print(f"Sent {reminder_type} reminder for guild {guild_id}")
+            self._log_with_prefix("REMINDER", f"Marked {reminder_type} reminder as sent in database for guild {guild_id}")
             
         except Exception as e:
-            print(f"Error sending reminder for guild {guild_id}: {e}")
+            self._log_with_prefix("REMINDER", f"Error sending {reminder_type} reminder for guild {guild_id}: {e}")
+            traceback.print_exc()
     
     def create_reminder_embed(self, post_data: dict, reminder_type: str, event_datetime_utc: datetime) -> disnake.Embed:
         """Create a reminder embed with timezone conversion"""
@@ -739,8 +872,8 @@ class ScheduleCog(commands.Cog):
         
         # Convert UTC time to user-friendly display
         # Note: We can't know each user's timezone, so we'll show multiple timezones
-        utc_time = event_datetime_utc.strftime("%I:%M %p UTC")
-        eastern_time = event_datetime_utc.astimezone(self.eastern_tz).strftime("%I:%M %p ET")
+        eastern_datetime = event_datetime_utc.astimezone(self.eastern_tz)
+        eastern_time, utc_time = self._format_time_display(eastern_datetime, event_datetime_utc)
         
         # Set embed properties based on reminder type
         if reminder_type == '4pm':
@@ -801,6 +934,8 @@ class ScheduleCog(commands.Cog):
             "",
             "**⏰ `/set_event_time`** - What time do your events usually start? This helps me send reminders at the right times.",
             "",
+            "**📅 `/set_posting_time`** - What time should I create the daily RSVP posts? (Default: 9:00 AM Eastern). This is when the post appears each day.",
+            "",
             "__**📋 Managing Your Events**__",
             "**📋 `/view_schedule`** - Show me this week's event plan. See what's happening each day at a glance.",
             "",
@@ -826,18 +961,27 @@ class ScheduleCog(commands.Cog):
             "",
             "**🔔 `/set_admin_channel`** - Choose where I send important alerts (like 'Hey, you forgot to set up this week's schedule!').",
             "",
-            "__**🔧 Advanced Options**__",
+            "__**🔧 Debugging & Diagnostics**__",
+            "**🔍 `/debug_auto_posting`** - Diagnose why automatic daily posts aren't working. Shows timing, settings, and schedule status.",
+            "",
+            "**🧪 `/test_auto_posting`** - Manually trigger the automatic posting check to see what happens right now (with debug logs).",
+            "",
+            "**🔄 `/restart_daily_task`** - Restart the automatic posting task if it's not working properly.",
+            "",
+            "**⚠️ `/rate_limit_status`** - Check if your server might be causing Discord rate limiting issues. Shows risk level and recommendations.",
+            "",
+            "**🔍 `/debug_view_rsvps`** - Debug why view_rsvps isn't finding posts when they exist.",
+            "",
+            "__**🔧 System & Settings**__",
             "**📋 `/list_commands`** - Show this help menu again anytime.",
             "",
             "**🤖 `/bot_status`** - Is the bot working properly? Check here if things seem slow.",
             "",
             "**🔍 `/monitor_status`** - Detailed bot health info (for tech-savvy users).",
             "",
-            "**🔧 `/test_connection`** - Test if I can connect to Discord and my database properly.",
+            "**🔧 `/test_database`** - Test database connection and show configuration details.",
             "",
-            "**⚙️ `/server_settings`** - Show all bot settings configured for this server.",
-            "",
-            "**🔍 `/debug_view_rsvps`** - Debug why view_rsvps isn't finding posts when they exist."
+            "**⚙️ `/server_settings`** - Show all bot settings configured for this server."
         ]
         
         embed = disnake.Embed(
@@ -1469,6 +1613,7 @@ class ScheduleCog(commands.Cog):
         no_rsvp_users = []
         
         # Process RSVP responses
+        print(f"[RATE-LIMIT] Processing {len(rsvps)} RSVP responses for view_rsvps")
         for rsvp in rsvps:
             user_id = rsvp['user_id']
             user = inter.guild.get_member(user_id)
@@ -1480,6 +1625,8 @@ class ScheduleCog(commands.Cog):
                 try:
                     user = await self.bot.fetch_user(user_id)
                     user_display = f"{user.display_name} ({user.name})"
+                    # Add rate limiting delay
+                    await asyncio.sleep(0.1)  # 100ms delay to respect rate limits
                 except:
                     user_display = f"Unknown User ({user_id})"
             
@@ -1493,6 +1640,7 @@ class ScheduleCog(commands.Cog):
                 mobile_users.append(user_display)
         
         # Process users who haven't RSVPed
+        print(f"[RATE-LIMIT] Processing {len(no_rsvp_user_ids)} no-response users for view_rsvps")
         for user_id in no_rsvp_user_ids:
             user = inter.guild.get_member(user_id)
             
@@ -1505,6 +1653,8 @@ class ScheduleCog(commands.Cog):
                     user = await self.bot.fetch_user(user_id)
                     user_display = f"{user.display_name} ({user.name})"
                     no_rsvp_users.append(user_display)
+                    # Add rate limiting delay
+                    await asyncio.sleep(0.1)  # 100ms delay to respect rate limits
                 except:
                     # Skip users we can't fetch (they might have left the server)
                     continue
@@ -1601,6 +1751,7 @@ class ScheduleCog(commands.Cog):
         no_rsvp_users = []
         
         # Process RSVP responses
+        print(f"[RATE-LIMIT] Processing {len(rsvps)} RSVP responses for view_yesterday_rsvps")
         for rsvp in rsvps:
             user_id = rsvp['user_id']
             user = inter.guild.get_member(user_id)
@@ -1612,6 +1763,8 @@ class ScheduleCog(commands.Cog):
                 try:
                     user = await self.bot.fetch_user(user_id)
                     user_display = f"{user.display_name} ({user.name})"
+                    # Add rate limiting delay
+                    await asyncio.sleep(0.1)  # 100ms delay to respect rate limits
                 except:
                     user_display = f"Unknown User ({user_id})"
             
@@ -1625,6 +1778,7 @@ class ScheduleCog(commands.Cog):
                 mobile_users.append(user_display)
         
         # Process users who haven't RSVPed
+        print(f"[RATE-LIMIT] Processing {len(no_rsvp_user_ids)} no-response users for view_yesterday_rsvps")
         for user_id in no_rsvp_user_ids:
             user = inter.guild.get_member(user_id)
             
@@ -1637,6 +1791,8 @@ class ScheduleCog(commands.Cog):
                     user = await self.bot.fetch_user(user_id)
                     user_display = f"{user.display_name} ({user.name})"
                     no_rsvp_users.append(user_display)
+                    # Add rate limiting delay
+                    await asyncio.sleep(0.1)  # 100ms delay to respect rate limits
                 except:
                     # Skip users we can't fetch (they might have left the server)
                     continue
@@ -2023,6 +2179,10 @@ class ScheduleCog(commands.Cog):
                         await message.delete()
                         print(f"Deleted old event message {message_id} from guild {guild_id}")
                         deleted_count += 1
+                        
+                        # Add rate limiting delay after each Discord API call
+                        await asyncio.sleep(0.5)  # 500ms delay between deletions
+                        
                     except disnake.NotFound:
                         # Message already deleted or not found
                         print(f"Message {message_id} not found in guild {guild_id}, already cleaned up")
@@ -2392,10 +2552,10 @@ class ScheduleCog(commands.Cog):
             )
 
     @commands.slash_command(
-        name="test_connection",
+        name="test_database",
         description="Test database connection and show configuration (admin only)"
     )
-    async def test_connection(self, inter: disnake.ApplicationCommandInteraction):
+    async def test_database(self, inter: disnake.ApplicationCommandInteraction):
         """Test database connection and show configuration details"""
         # Check permissions
         if not check_admin_or_specific_user(inter):
@@ -2693,5 +2853,387 @@ class ScheduleCog(commands.Cog):
                 f"An error occurred while retrieving server settings: {str(e)}"
             )
 
+    @commands.slash_command(
+        name="debug_auto_posting",
+        description="Debug the automatic posting system (admin only)"
+    )
+    async def debug_auto_posting(self, inter: disnake.ApplicationCommandInteraction):
+        """Debug the automatic posting system"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        await inter.response.defer(ephemeral=True)
+        
+        try:
+            guild_id = inter.guild.id
+            now_eastern = datetime.now(self.eastern_tz)
+            current_time = now_eastern.time().replace(second=0, microsecond=0)
+            today = now_eastern.date()
+            
+            # Create debug embed
+            embed = disnake.Embed(
+                title="🔍 Debug: Automatic Posting System",
+                description=f"Diagnosing automatic posting for **{inter.guild.name}**",
+                color=disnake.Color.yellow()
+            )
+            
+            # Current time info
+            embed.add_field(
+                name="⏰ Current Time Information",
+                value=f"**Eastern Time:** {now_eastern.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
+                      f"**Comparison Time:** {current_time.strftime('%H:%M:%S')}\n"
+                      f"**Today's Date:** {today.isoformat()}",
+                inline=False
+            )
+            
+            # Get guild settings
+            guild_settings = await database.get_guild_settings(guild_id)
+            
+            if not guild_settings:
+                embed.add_field(
+                    name="❌ Guild Settings",
+                    value="No guild settings found in database",
+                    inline=False
+                )
+            else:
+                # Posting time info
+                post_time_str = guild_settings.get('post_time', '09:00:00')
+                try:
+                    guild_post_time = datetime.strptime(post_time_str, '%H:%M:%S').time()
+                    post_time_display = guild_post_time.strftime('%I:%M %p')
+                    time_match = (current_time.hour == guild_post_time.hour and 
+                                current_time.minute == guild_post_time.minute)
+                except ValueError:
+                    guild_post_time = datetime.strptime('09:00:00', '%H:%M:%S').time()
+                    post_time_display = "9:00 AM (default)"
+                    time_match = False
+                
+                embed.add_field(
+                    name="📅 Posting Configuration",
+                    value=f"**Configured Time:** {post_time_display} ET ({post_time_str})\n"
+                          f"**Time Match:** {'✅ YES' if time_match else '❌ NO'}\n"
+                          f"**Event Channel:** <#{guild_settings.get('event_channel_id')}>" if guild_settings.get('event_channel_id') else "❌ Not set",
+                    inline=False
+                )
+            
+            # Check if guild has schedules
+            schedule = await database.get_guild_schedule(guild_id)
+            is_current_week_setup = await self.check_current_week_setup(guild_id)
+            
+            embed.add_field(
+                name="📋 Schedule Status",
+                value=f"**Has Schedule:** {'✅ YES' if schedule else '❌ NO'}\n"
+                      f"**Current Week Setup:** {'✅ YES' if is_current_week_setup else '❌ NO'}\n"
+                      f"**Days Configured:** {len(schedule) if schedule else 0}/7",
+                inline=False
+            )
+            
+            # Check existing posts for today
+            existing_post = await database.get_daily_post(guild_id, today)
+            embed.add_field(
+                name="📝 Today's Post Status",
+                value=f"**Existing Post:** {'✅ YES' if existing_post else '❌ NO'}\n"
+                      f"**Post ID:** {existing_post.get('id') if existing_post else 'None'}\n"
+                      f"**Message ID:** {existing_post.get('message_id') if existing_post else 'None'}",
+                inline=False
+            )
+            
+            # Task status
+            daily_task_running = not self.daily_posting_task.is_being_cancelled() and not self.daily_posting_task.done()
+            reminder_task_running = not self.reminder_check_task.is_being_cancelled() and not self.reminder_check_task.done()
+            
+            embed.add_field(
+                name="🔄 Task Status",
+                value=f"**Daily Task Running:** {'✅ YES' if daily_task_running else '❌ NO'}\n"
+                      f"**Reminder Task Running:** {'✅ YES' if reminder_task_running else '❌ NO'}\n"
+                      f"**Daily Task Cancelled:** {'❌ YES' if self.daily_posting_task.is_being_cancelled() else '✅ NO'}\n"
+                      f"**Daily Task Done:** {'⚠️ YES' if self.daily_posting_task.done() else '✅ NO'}",
+                inline=False
+            )
+            
+            # Duplicate prevention status
+            posting_tracked = guild_id in self.last_posted_times
+            reminder_4pm_tracked = (guild_id, '4pm') in self.last_reminder_times
+            reminder_1h_tracked = (guild_id, '1_hour') in self.last_reminder_times
+            reminder_15m_tracked = (guild_id, '15_minutes') in self.last_reminder_times
+            
+            embed.add_field(
+                name="🛡️ Duplicate Prevention",
+                value=f"**Daily Posting:** {'✅ Tracked' if posting_tracked else '⚪ Not tracked yet'}\n"
+                      f"**4PM Reminder:** {'✅ Tracked' if reminder_4pm_tracked else '⚪ Not tracked yet'}\n"
+                      f"**1H Reminder:** {'✅ Tracked' if reminder_1h_tracked else '⚪ Not tracked yet'}\n"
+                      f"**15M Reminder:** {'✅ Tracked' if reminder_15m_tracked else '⚪ Not tracked yet'}",
+                inline=False
+            )
+            
+            # Recommendations
+            recommendations = []
+            if not guild_settings:
+                recommendations.append("• Configure guild settings first")
+            elif not guild_settings.get('event_channel_id'):
+                recommendations.append("• Set event channel with `/set_event_channel`")
+            if not schedule:
+                recommendations.append("• Set up weekly schedule with `/setup_weekly_schedule`")
+            if not is_current_week_setup:
+                recommendations.append("• Update current week's schedule")
+            if existing_post:
+                recommendations.append("• Today's post already exists - delete if testing")
+            if not daily_task_running or not reminder_task_running:
+                recommendations.append("• Restart the bot to fix task issues")
+            
+            if recommendations:
+                embed.add_field(
+                    name="💡 Recommendations",
+                    value="\n".join(recommendations),
+                    inline=False
+                )
+            
+            # Test posting time calculation
+            if guild_settings and guild_settings.get('post_time'):
+                next_post_time = now_eastern.replace(
+                    hour=guild_post_time.hour,
+                    minute=guild_post_time.minute,
+                    second=0,
+                    microsecond=0
+                )
+                
+                # If the time has already passed today, show tomorrow's time
+                if next_post_time <= now_eastern:
+                    next_post_time += timedelta(days=1)
+                
+                time_until = next_post_time - now_eastern
+                hours, remainder = divmod(int(time_until.total_seconds()), 3600)
+                minutes, _ = divmod(remainder, 60)
+                
+                embed.add_field(
+                    name="⏳ Next Posting Time",
+                    value=f"**Next Post:** {next_post_time.strftime('%Y-%m-%d %I:%M %p')} ET\n"
+                          f"**Time Until:** {hours}h {minutes}m",
+                    inline=False
+                )
+            
+            embed.set_footer(text="Use this information to troubleshoot automatic posting issues")
+            
+            await inter.edit_original_message(embed=embed)
+            
+        except Exception as e:
+            await inter.edit_original_message(
+                f"❌ **Error in Debug Command**\n"
+                f"An error occurred while debugging: {str(e)}"
+            )
+
+    @commands.slash_command(
+        name="test_auto_posting",
+        description="Manually trigger the automatic posting check (admin only)"
+    )
+    async def test_auto_posting(self, inter: disnake.ApplicationCommandInteraction):
+        """Manually trigger the automatic posting check"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        await inter.response.send_message(
+            "🔄 **Testing Automatic Posting**\n"
+            "Manually triggering the posting check... Check the console for `[AUTO-POST]` logs.",
+            ephemeral=True
+        )
+        
+        try:
+            # Manually call the posting check function
+            await self.check_and_post_daily_events()
+            
+        except Exception as e:
+            print(f"[TEST] Error in manual posting check: {e}")
+            traceback.print_exc()
+            
+            await inter.edit_original_message(
+                f"❌ **Test Failed**\n"
+                f"Error during manual posting check: {str(e)}\n"
+                f"Check console logs for details."
+            )
+            return
+        
+        await inter.edit_original_message(
+            "✅ **Test Complete**\n"
+            "Manual posting check finished. Check the console for `[AUTO-POST]` debug logs to see what happened."
+        )
+
+    @commands.slash_command(
+        name="restart_daily_task",
+        description="Restart the daily posting task (admin only)"
+    )
+    async def restart_daily_task(self, inter: disnake.ApplicationCommandInteraction):
+        """Restart the daily posting task"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        await inter.response.defer(ephemeral=True)
+        
+        try:
+            # Get current task status
+            task_running = not self.daily_posting_task.is_being_cancelled() and not self.daily_posting_task.done()
+            task_cancelled = self.daily_posting_task.is_being_cancelled()
+            task_done = self.daily_posting_task.done()
+            
+            status_before = f"Running: {task_running}, Cancelled: {task_cancelled}, Done: {task_done}"
+            
+            # Cancel the current task if it exists
+            if not self.daily_posting_task.done():
+                self.daily_posting_task.cancel()
+                print(f"[RESTART] Cancelled existing daily posting task")
+            
+            # Wait a moment for cancellation to complete
+            await asyncio.sleep(1)
+            
+            # Start a new task
+            self.daily_posting_task.start()
+            print(f"[RESTART] Started new daily posting task")
+            
+            # Get new status
+            new_task_running = not self.daily_posting_task.is_being_cancelled() and not self.daily_posting_task.done()
+            new_task_cancelled = self.daily_posting_task.is_being_cancelled()
+            new_task_done = self.daily_posting_task.done()
+            
+            status_after = f"Running: {new_task_running}, Cancelled: {new_task_cancelled}, Done: {new_task_done}"
+            
+            await inter.edit_original_message(
+                f"✅ **Daily Task Restarted**\n\n"
+                f"**Before:** {status_before}\n"
+                f"**After:** {status_after}\n\n"
+                f"The task should now run every minute. Watch the console for `[TASK]` logs to confirm it's working."
+            )
+            
+        except Exception as e:
+            print(f"[RESTART] Error restarting daily task: {e}")
+            await inter.edit_original_message(
+                f"❌ **Error Restarting Task**\n"
+                f"Error: {str(e)}\n\n"
+                f"You may need to restart the bot completely."
+                         )
+
+    @commands.slash_command(
+        name="rate_limit_status",
+        description="Check potential rate limiting issues and bot API usage (admin only)"
+    )
+    async def rate_limit_status(self, inter: disnake.ApplicationCommandInteraction):
+        """Check for potential rate limiting issues"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        await inter.response.defer(ephemeral=True)
+        
+        try:
+            guild_id = inter.guild.id
+            today = datetime.now(self.eastern_tz).date()
+            
+            # Get data that could cause rate limiting
+            posts_today = await database.get_all_daily_posts_for_date(guild_id, today)
+            rsvps_today = await database.get_aggregated_rsvp_responses_for_date(guild_id, today)
+            
+            # Count guild members (potential API calls)
+            all_members = [member for member in inter.guild.members if not member.bot]
+            
+            # Create analysis embed
+            embed = disnake.Embed(
+                title="⚠️ Rate Limiting Analysis",
+                description=f"Analyzing potential Discord API rate limiting risks for **{inter.guild.name}**",
+                color=disnake.Color.orange()
+            )
+            
+            # Current usage analysis
+            embed.add_field(
+                name="📊 Current Data",
+                value=f"**Guild Members:** {len(all_members)} (excluding bots)\n"
+                      f"**Today's Posts:** {len(posts_today)}\n"
+                      f"**Today's RSVPs:** {len(rsvps_today)}\n"
+                      f"**Bot Serves:** {len(self.bot.guilds)} guilds",
+                inline=False
+            )
+            
+            # Risk assessment
+            risk_factors = []
+            risk_level = "🟢 LOW"
+            
+            if len(all_members) > 100:
+                risk_factors.append(f"• Large server ({len(all_members)} members)")
+                risk_level = "🟡 MEDIUM"
+            
+            if len(all_members) > 500:
+                risk_factors.append(f"• Very large server requires many user fetches")
+                risk_level = "🔴 HIGH"
+            
+            if len(rsvps_today) > 50:
+                risk_factors.append(f"• Many RSVPs ({len(rsvps_today)}) trigger user fetches")
+                if risk_level == "🟢 LOW":
+                    risk_level = "🟡 MEDIUM"
+            
+            # Rate limiting protections
+            protections = [
+                "✅ User fetch delays (100ms per user)",
+                "✅ Cleanup delays (500ms per message)", 
+                "✅ Duplicate post prevention",
+                "✅ Task error handling",
+                "✅ Debug logging for monitoring"
+            ]
+            
+            embed.add_field(
+                name="🛡️ Active Protections",
+                value="\n".join(protections),
+                inline=False
+            )
+            
+            # Risk assessment  
+            embed.add_field(
+                name="⚠️ Risk Level",
+                value=f"**Level:** {risk_level}\n" + 
+                      ("\n".join(risk_factors) if risk_factors else "• No significant risk factors"),
+                inline=False
+            )
+            
+            # Recommendations
+            recommendations = [
+                "• Monitor console for `[RATE-LIMIT]` logs",
+                "• Avoid simultaneous `/view_rsvps` + cleanup commands",
+                "• Use `/debug_auto_posting` for troubleshooting"
+            ]
+            
+            if len(all_members) > 500:
+                recommendations.insert(0, "• Limit `/view_rsvps` usage during peak times")
+            
+            embed.add_field(
+                name="💡 Best Practices",
+                value="\n".join(recommendations),
+                inline=False
+            )
+            
+            embed.set_footer(text="459 errors = Cloudflare rate limiting | Watch for [RATE-LIMIT] logs")
+            
+            await inter.edit_original_message(embed=embed)
+            
+        except Exception as e:
+            await inter.edit_original_message(
+                f"❌ **Error in Rate Limit Analysis**\n"
+                f"Error: {str(e)}"
+            )
+ 
 def setup(bot):
     bot.add_cog(ScheduleCog(bot)) 
