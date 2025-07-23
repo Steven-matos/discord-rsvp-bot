@@ -1,0 +1,332 @@
+DISCORD RSVP BOT - COMPLETE USER GUIDE
+====================================
+
+OVERVIEW
+--------
+The Discord RSVP Bot is a comprehensive event management system designed for Discord communities that organize regular weekly activities. Whether you're running gaming raids, training sessions, or community meetups, this bot automates the entire process of event scheduling, RSVP tracking, and member notifications.
+
+KEY FEATURES
+------------
+✅ Weekly Event Planning - Set up recurring events for each day of the week
+✅ Automatic Daily Posts - Bot posts event announcements at your configured time
+✅ Smart RSVP System - Members respond with Yes/No/Maybe/Mobile buttons
+✅ Intelligent Reminders - Multiple reminder types (4PM, 1-hour, 15-minute before events)
+✅ Mobile User Support - Special RSVP option for members joining via mobile
+✅ Comprehensive Attendance Tracking - See who's coming to each event
+✅ Admin Management Tools - Full control over schedules and settings
+✅ Automatic Cleanup - Removes old event posts to keep channels tidy
+✅ Advanced Monitoring - Bot health checks and performance metrics
+✅ Database Integration - Persistent data storage via Supabase
+
+TECHNICAL REQUIREMENTS
+---------------------
+• Discord Server (with admin permissions)
+• Free Supabase Account (for data storage)
+• Python 3.8+ (if self-hosting)
+• Basic command line knowledge (for setup)
+
+BOT INVITATION LINK
+------------------
+https://discord.com/oauth2/authorize?client_id=1388283299562262559&permissions=1144344644123728&integration_type=0&scope=bot
+
+REQUIRED PERMISSIONS
+-------------------
+The bot needs these Discord permissions to function properly:
+• Send Messages - Post event announcements
+• Use Slash Commands - Enable command functionality  
+• Manage Messages - Delete old posts during cleanup
+• View Members - Check server membership for RSVP tracking
+• Embed Links - Create rich event displays
+
+QUICK START GUIDE
+-----------------
+1. Invite the bot to your Discord server
+2. Set up a Supabase database (free at supabase.com)
+3. Configure your weekly schedule: /setup_weekly_schedule
+4. Set your event channel: /set_event_channel #your-channel
+5. Set event times: /set_event_time hour:20 minute:0
+6. Configure reminders: /configure_reminders
+7. Watch the magic happen automatically!
+
+CORE COMMANDS - GETTING STARTED
+-------------------------------
+
+/setup_weekly_schedule
+• Interactive setup for your weekly events
+• Configure each day with event name, outfit/gear, and vehicle
+• Example: Monday = "Raid Night" | Combat Gear | Tank
+
+/set_event_channel <channel>
+• Choose where daily event posts appear
+• This channel will show RSVP buttons and member responses
+• Example: /set_event_channel #events
+
+/set_event_time <hour> <minute>
+• Set when your events start (Eastern Time)
+• Used for reminder calculations
+• Example: /set_event_time 20 0 (8:00 PM Eastern)
+
+/set_posting_time <hour> <minute>  
+• When daily RSVP posts are created (default: 9:00 AM Eastern)
+• Example: /set_posting_time 9 0
+
+/configure_reminders
+• Control when reminder notifications are sent
+• Options: 4:00 PM daily, 1 hour before, 15 minutes before
+• All can be enabled/disabled independently
+
+SCHEDULE MANAGEMENT COMMANDS
+----------------------------
+
+/view_schedule
+• Display your complete weekly event schedule
+• Shows all 7 days with event details
+
+/edit_event <day>
+• Modify or add events for specific days
+• Interactive modal for easy editing
+• Example: /edit_event monday
+
+MEMBER INTERACTION COMMANDS
+---------------------------
+
+/view_rsvps
+• See who's attending today's event
+• Shows Yes/No/Maybe/Mobile responses
+• Displays non-responders
+
+/view_yesterday_rsvps
+• Review attendance from previous day
+• Great for tracking participation trends
+
+ADMIN & TROUBLESHOOTING COMMANDS
+-------------------------------
+
+/force_post_rsvp
+• Manually post today's RSVP if automatic posting fails
+• Shows progress updates during posting
+
+/delete_message <message_id>
+• Remove specific messages by ID
+• Useful for cleaning up mistakes
+
+/cleanup_old_posts
+• Manually remove old event posts
+• Preserves RSVP data while cleaning Discord messages
+
+/set_admin_channel <channel>
+• Choose where admin notifications are sent
+• Includes alerts about missing weekly schedules
+
+/reset_setup
+• Clear stuck weekly schedule setup process
+• Use if setup gets interrupted
+
+/force_sync  
+• Refresh bot commands if they're not appearing
+• Forces re-registration with Discord
+
+MONITORING & DIAGNOSTICS
+------------------------
+
+/bot_status
+• Check bot uptime and basic health metrics
+• Connection status and guild count
+
+/monitor_status
+• Detailed performance information
+• Memory usage, CPU stats, latency data
+
+/test_connection
+• Verify Discord and database connectivity
+• Troubleshoot connection issues
+
+/debug_auto_posting
+• Diagnose automatic posting problems
+• Shows timing, settings, and schedule status
+
+/restart_daily_task
+• Restart automatic posting system
+• Use if daily posts stop working
+
+/rate_limit_status
+• Check Discord rate limiting status
+• Recommendations for large servers
+
+/server_settings
+• Display all bot configuration for your server
+• Complete settings overview
+
+HOW THE RSVP SYSTEM WORKS
+-------------------------
+
+DAILY WORKFLOW:
+1. Bot automatically posts daily events at your configured time
+2. Members click buttons to RSVP: ✅ Yes | ❌ No | ❓ Maybe | 📱 Mobile
+3. Bot sends reminders based on your settings
+4. Admins can view attendance with /view_rsvps
+
+RSVP OPTIONS:
+• YES - "I'm attending the event"
+• NO - "I can't make it today"  
+• MAYBE - "I might attend, not certain"
+• MOBILE - "I'm attending but on mobile device"
+
+AUTOMATIC FEATURES:
+• Daily event posts at your configured time
+• Smart reminders (4PM, 1-hour before, 15-min before)
+• Automatic cleanup of old posts
+• Weekly schedule validation
+• Admin notifications for missing schedules
+
+EXAMPLE WEEKLY SCHEDULE
+-----------------------
+Monday: "Raid Night" | Combat Gear | Main Battle Tank
+Tuesday: "PvP Tournament" | Light Armor | Fast Attack Vehicle  
+Wednesday: "Training Session" | Practice Gear | Transport Helicopter
+Thursday: "Casual Night" | Comfortable Attire | Any Vehicle
+Friday: "Weekend Prep" | Mission Gear | Heavy Transport
+Saturday: "Open Play" | Casual Gear | Personal Choice
+Sunday: "Planning Meeting" | Formal Attire | Command Vehicle
+
+REMINDER SYSTEM
+---------------
+The bot can send up to 3 types of reminders:
+
+4:00 PM EASTERN REMINDER:
+• Daily notification about tonight's event
+• Sent regardless of event time
+• Good for early awareness
+
+1-HOUR BEFORE REMINDER:
+• Sent exactly 1 hour before event start time
+• Final preparation notice
+• Based on your configured event time
+
+15-MINUTE REMINDER:
+• Last-chance notification
+• Sent 15 minutes before event starts
+• "Get ready now" alert
+
+ADMIN FEATURES
+--------------
+• Special user access (specific user IDs have full admin rights)
+• Server admin permissions automatically grant access
+• Admin notifications when schedules aren't set up
+• Force posting capabilities for troubleshooting
+• Complete configuration control
+
+TROUBLESHOOTING GUIDE
+--------------------
+
+COMMANDS NOT SHOWING:
+1. Use /force_sync to refresh commands
+2. Check bot permissions in server settings
+3. Wait up to 1 hour for Discord to update
+4. Restart bot if self-hosting
+
+AUTOMATIC POSTING NOT WORKING:
+1. Use /debug_auto_posting to diagnose
+2. Verify weekly schedule is configured
+3. Check event channel permissions
+4. Confirm posting time settings
+5. Try /restart_daily_task
+
+RSVP POSTS NOT APPEARING:
+1. Use /force_post_rsvp to post manually  
+2. Check bot permissions in event channel
+3. Verify current week's schedule is set up
+4. Ensure event channel is configured
+
+REMINDERS NOT SENDING:
+1. Check reminder settings with /configure_reminders
+2. Verify event time is configured
+3. Confirm reminders are enabled
+4. Check bot permissions in event channel
+
+DATABASE ERRORS:
+1. Verify Supabase project is active
+2. Check SUPABASE_URL and SUPABASE_KEY
+3. Confirm database tables are created
+4. Test connection with /test_connection
+
+RATE LIMITING ISSUES:
+1. Use /rate_limit_status to check server risk
+2. Avoid frequent /view_rsvps in large servers (500+ members)
+3. Bot includes automatic rate limiting protection
+4. Space out admin commands during peak times
+
+PERMISSION ERRORS:
+• Ensure bot has required permissions in event channels
+• Check "Manage Messages" permission for cleanup features
+• Verify "Send Messages" and "Embed Links" permissions
+• Admin users need "Manage Guild" permission or be on approved list
+
+ADVANCED FEATURES
+-----------------
+
+MULTIPLE POSTS PER DAY:
+• Bot handles multiple manual posts for same event
+• Aggregates RSVP responses across all posts
+• Useful for re-posting if original is deleted
+
+MOBILE USER SUPPORT:
+• Special RSVP category for mobile players
+• Helps organizers plan for different participation types
+• Tracked separately in attendance reports
+
+AUTOMATIC CLEANUP:
+• Removes Discord messages older than yesterday
+• Preserves all RSVP data in database
+• Keeps channels clean without losing attendance history
+
+TIMEZONE HANDLING:
+• All times use Eastern Time Zone
+• Automatic daylight saving time adjustment
+• Clear time displays show both Eastern and UTC
+
+PERFORMANCE MONITORING:
+• Real-time bot health metrics
+• Memory and CPU usage tracking
+• Connection quality monitoring
+• Automatic error recovery
+
+DATA PERSISTENCE:
+• All schedules stored in Supabase database
+• RSVP responses preserved permanently
+• Admin settings maintained across restarts
+• Historical attendance data available
+
+SECURITY FEATURES
+-----------------
+• Admin command restrictions
+• User ID verification system
+• Database connection encryption
+• Environment variable protection
+• Permission-based access control
+
+BEST PRACTICES
+--------------
+1. Set up weekly schedules at start of each week
+2. Monitor bot status regularly with diagnostic commands
+3. Use cleanup commands to maintain channel organization
+4. Test changes with debug commands before events
+5. Keep Supabase project active and updated
+6. Review attendance trends with yesterday RSVP commands
+7. Configure appropriate reminder timing for your community
+
+SUPPORT & MAINTENANCE
+--------------------
+• Bot includes comprehensive error handling
+• Automatic recovery from connection issues
+• Real-time diagnostic commands available
+• Database backups handled by Supabase
+• Performance monitoring and alerting built-in
+
+For technical support, use the bot's built-in diagnostic commands or check the console logs if self-hosting. The bot provides detailed error messages and troubleshooting guidance for common issues.
+
+CONCLUSION
+----------
+The Discord RSVP Bot transforms event management from a manual chore into an automated system that enhances community engagement. With its comprehensive feature set, intelligent automation, and robust monitoring capabilities, it's the perfect solution for any Discord community that values organized, well-attended events.
+
+Ready to revolutionize your community events? Invite the bot today and experience the difference automated event management can make! 
