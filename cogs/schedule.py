@@ -177,9 +177,47 @@ class RSVPView(disnake.ui.View):
         await self.handle_rsvp(inter, "mobile")
     
     async def handle_rsvp(self, inter: disnake.MessageInteraction, response_type: str):
-        """Handle RSVP button clicks"""
+        """
+        Handle RSVP button clicks with time validation.
+        Prevents RSVPs after the event time has passed.
+        """
         user_id = inter.author.id
         guild_id = inter.guild.id
+        
+        # Get guild settings to check event time
+        guild_settings = await database.get_guild_settings(guild_id)
+        
+        # Check if event time is set and if current time has passed it
+        if guild_settings and 'event_time' in guild_settings:
+            # Eastern timezone for consistency with event scheduling
+            eastern_tz = pytz.timezone('America/New_York')
+            now_eastern = datetime.now(eastern_tz)
+            today_date = now_eastern.date()
+            
+            # Parse the event time from guild settings (format: "HH:MM:SS")
+            event_time_str = guild_settings['event_time']
+            try:
+                # Parse the time and combine with today's date
+                event_time = datetime.strptime(event_time_str, '%H:%M:%S').time()
+                event_datetime = datetime.combine(today_date, event_time)
+                event_datetime_eastern = eastern_tz.localize(event_datetime)
+                
+                # Check if the event time has passed
+                if now_eastern >= event_datetime_eastern:
+                    # Convert to 12-hour format for user-friendly display
+                    event_time_display = event_time.strftime('%I:%M %p')
+                    await inter.response.send_message(
+                        f"⏰ **RSVP Period Closed**\n"
+                        f"Sorry, you cannot RSVP after the event has started.\n"
+                        f"Today's event started at **{event_time_display} Eastern Time**.\n"
+                        f"Please join us for the next event!",
+                        ephemeral=True
+                    )
+                    return
+                    
+            except (ValueError, TypeError) as e:
+                # If there's an error parsing the event time, log it but don't block RSVPs
+                print(f"Error parsing event time '{event_time_str}' for guild {guild_id}: {e}")
         
         # Save RSVP to database
         success = await database.save_rsvp_response(self.post_id, user_id, guild_id, response_type)
@@ -255,6 +293,58 @@ class ScheduleCog(commands.Cog):
             return guild, None, guild_settings
         
         return guild, channel, guild_settings
+    
+    def _split_user_list_into_fields(self, embed: disnake.Embed, users: list, field_name: str, emoji: str, day_name: str, inline: bool = True):
+        """
+        Helper method to split long user lists into multiple embed fields if needed.
+        Discord has a 1024 character limit per field value.
+        
+        Args:
+            embed (disnake.Embed): The Discord embed to add fields to
+            users (list): List of user display names to add
+            field_name (str): The name of the field (e.g., "Attending", "No Response")
+            emoji (str): The emoji to display with the field name (e.g., "✅", "⏰")
+            day_name (str): The day name for the field title
+            inline (bool): Whether the fields should be inline (default: True)
+        
+        Returns:
+            None: Modifies the embed object directly
+        """
+        if not users:
+            return
+            
+        user_list = "\n".join(users)
+        if len(user_list) <= 1024:
+            embed.add_field(
+                name=f"{emoji} {day_name} - {field_name} ({len(users)})",
+                value=user_list,
+                inline=inline
+            )
+        else:
+            # Split into chunks that fit within Discord's field limit
+            chunks = []
+            current_chunk = []
+            current_length = 0
+            
+            for user in users:
+                user_with_newline = user + "\n"
+                if current_length + len(user_with_newline) > 1024:
+                    chunks.append("\n".join(current_chunk))
+                    current_chunk = [user]
+                    current_length = len(user_with_newline)
+                else:
+                    current_chunk.append(user)
+                    current_length += len(user_with_newline)
+            
+            if current_chunk:
+                chunks.append("\n".join(current_chunk))
+            
+            for i, chunk in enumerate(chunks):
+                embed.add_field(
+                    name=f"{emoji} {day_name} - {field_name} ({len(users)})" + (f" - Part {i+1}" if len(chunks) > 1 else ""),
+                    value=chunk,
+                    inline=inline
+                )
     
     def _check_duplicate_prevention(self, tracking_dict: dict, key, current_minute_key: datetime, log_prefix: str, action_name: str) -> bool:
         """
@@ -791,10 +881,10 @@ class ScheduleCog(commands.Cog):
             print(f"[REMINDER] Checking reminders for guild {guild_id} at {eastern_now.strftime('%H:%M:%S')} Eastern")
             print(f"[REMINDER] Event time: {event_time_str}, Current time: {eastern_now.strftime('%H:%M:%S')}")
             
-            # Check for 4:00 PM Eastern reminder
+            # Check for 4:00 PM Eastern reminder (within 5-minute window: 16:00-16:04)
             if (settings.get('reminder_enabled', True) and 
                 settings.get('reminder_4pm', True) and
-                eastern_now.hour == 16 and eastern_now.minute == 0):  # 4:00 PM Eastern
+                eastern_now.hour == 16 and eastern_now.minute < 5):  # 4:00-4:04 PM Eastern
                 
                 reminder_key = (guild_id, '4pm')
                 if self._check_duplicate_prevention(self.last_reminder_times, reminder_key, current_minute_key, "REMINDER", f"4pm reminder for guild {guild_id}"):
@@ -806,9 +896,12 @@ class ScheduleCog(commands.Cog):
                     await self.send_reminder(guild_id, post_data, '4pm', event_datetime_utc)
                     self.last_reminder_times[reminder_key] = current_minute_key
             
-            # Check for 1 hour before event reminder
+            # Check for 1 hour before event reminder (within 5-minute window)
+            one_hour_before = event_datetime_eastern - timedelta(hours=1)
+            one_hour_before_window_end = one_hour_before + timedelta(minutes=4)  # 5-minute window
+            
             if (settings.get('reminder_1_hour', True) and 
-                eastern_now.hour == event_time.hour - 1 and eastern_now.minute == 0):  # 1 hour before
+                one_hour_before <= eastern_now <= one_hour_before_window_end):
                 
                 reminder_key = (guild_id, '1_hour')
                 if self._check_duplicate_prevention(self.last_reminder_times, reminder_key, current_minute_key, "REMINDER", f"1_hour reminder for guild {guild_id}"):
@@ -820,9 +913,12 @@ class ScheduleCog(commands.Cog):
                     await self.send_reminder(guild_id, post_data, '1_hour', event_datetime_utc)
                     self.last_reminder_times[reminder_key] = current_minute_key
             
-            # Check for 15 minutes before event reminder
+            # Check for 15 minutes before event reminder (within 5-minute window)
+            fifteen_min_before = event_datetime_eastern - timedelta(minutes=15)
+            fifteen_min_before_window_end = fifteen_min_before + timedelta(minutes=4)  # 5-minute window
+            
             if (settings.get('reminder_15_minutes', True) and 
-                eastern_now.hour == event_time.hour and eastern_now.minute == event_time.minute - 15):  # 15 minutes before
+                fifteen_min_before <= eastern_now <= fifteen_min_before_window_end):
                 
                 reminder_key = (guild_id, '15_minutes')
                 if self._check_duplicate_prevention(self.last_reminder_times, reminder_key, current_minute_key, "REMINDER", f"15_minutes reminder for guild {guild_id}"):
@@ -948,20 +1044,58 @@ class ScheduleCog(commands.Cog):
             "",
             "**📊 `/view_yesterday_rsvps`** - Check who showed up yesterday. Great for seeing attendance trends!",
             "",
+            "**📈 `/midweek_rsvp_report`** - Get a detailed mid-week RSVP report (Monday-Wednesday). Shows actual member names who RSVPed Yes/No/Maybe/Mobile, plus participation stats and attendance patterns.",
+            "",
+            "**📊 `/weekly_rsvp_report`** - Get a comprehensive weekly RSVP report (Monday-Sunday). Shows member names, attendance analysis, participation trends, and identifies most active attendees.",
+            "",
+            "__**🔧 Help & Support**__",
+            "**📋 `/list_commands`** - Show this help menu again anytime.",
+            "",
+            "**🔧 `/list_help`** - Show troubleshooting, maintenance, and advanced diagnostic commands."
+        ]
+        
+        embed = disnake.Embed(
+            title="📋 Available Commands",
+            description="\n".join(commands_list),
+            color=disnake.Color.blue()
+        )
+        
+        await inter.response.send_message(embed=embed, ephemeral=True)
+    
+    @commands.slash_command(
+        name="list_help",
+        description="List troubleshooting, maintenance, and diagnostic commands (admin only)"
+    )
+    async def list_help(self, inter: disnake.ApplicationCommandInteraction):
+        """
+        List troubleshooting, maintenance, and advanced diagnostic commands.
+        Shows commands for fixing issues, cleaning up data, maintaining the bot,
+        and diagnosing system problems.
+        """
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        debug_commands_list = [
             "__**🛠️ Troubleshooting & Fixes**__",
             "**🚀 `/force_post_rsvp`** - Didn't get today's event post? Use this to make me post it right now.",
             "",
             "**🔄 `/reset_setup`** - Stuck on 'setup already in progress'? This clears the setup state so you can start fresh.",
             "",
-            "**🗑️ `/delete_message`** - Remove any unwanted message by copying its ID. Useful for cleaning up mistakes.",
-            "",
             "**🔄 `/force_sync`** - Commands not showing up when you type '/'? This refreshes everything.",
+            "",
+            "__**🧹 Maintenance & Cleanup**__",
+            "**🗑️ `/delete_message`** - Remove any unwanted message by copying its ID. Useful for cleaning up mistakes.",
             "",
             "**🧹 `/cleanup_old_posts`** - Remove old event posts to keep your channel tidy (but keeps all the RSVP records).",
             "",
             "**🔔 `/set_admin_channel`** - Choose where I send important alerts (like 'Hey, you forgot to set up this week's schedule!').",
             "",
-            "__**🔧 Debugging & Diagnostics**__",
+            "__**🔧 Advanced Diagnostics**__",
             "**🔍 `/debug_auto_posting`** - Diagnose why automatic daily posts aren't working. Shows timing, settings, and schedule status.",
             "",
             "**🧪 `/test_auto_posting`** - Manually trigger the automatic posting check to see what happens right now (with debug logs).",
@@ -972,23 +1106,32 @@ class ScheduleCog(commands.Cog):
             "",
             "**🔍 `/debug_view_rsvps`** - Debug why view_rsvps isn't finding posts when they exist.",
             "",
-            "__**🔧 System & Settings**__",
-            "**📋 `/list_commands`** - Show this help menu again anytime.",
+            "**🔍 `/debug_reminders`** - Debug why reminders are not being sent out. Shows complete system diagnosis.",
             "",
+            "**🧪 `/test_reminder`** - Manually trigger reminder checks to test if the system is working.",
+            "",
+            "**🔄 `/reset_reminder_tracking`** - Reset reminder tracking to test reminders again today (debugging only).",
+            "",
+            "__**🔧 System Information**__",
             "**🤖 `/bot_status`** - Is the bot working properly? Check here if things seem slow.",
             "",
             "**🔍 `/monitor_status`** - Detailed bot health info (for tech-savvy users).",
             "",
             "**🔧 `/test_database`** - Test database connection and show configuration details.",
             "",
-            "**⚙️ `/server_settings`** - Show all bot settings configured for this server."
+            "**⚙️ `/server_settings`** - Show all bot settings configured for this server.",
+            "",
+            "__**📋 Navigation**__",
+            "**📋 `/list_commands`** - Return to the main commands list for regular bot features."
         ]
         
         embed = disnake.Embed(
-            title="📋 Available Commands",
-            description="\n".join(commands_list),
-            color=disnake.Color.blue()
+            title="🔧 Debug & Advanced Commands",
+            description="\n".join(debug_commands_list),
+            color=disnake.Color.orange()
         )
+        
+        embed.set_footer(text="Commands for troubleshooting, maintenance, and advanced diagnostics | Admin only")
         
         await inter.response.send_message(embed=embed, ephemeral=True)
     
@@ -1846,6 +1989,580 @@ class ScheduleCog(commands.Cog):
         await inter.response.send_message(embed=embed, ephemeral=True)
 
     @commands.slash_command(
+        name="midweek_rsvp_report",
+        description="View RSVP summary for Monday-Wednesday of this week (admin only)"
+    )
+    async def midweek_rsvp_report(self, inter: disnake.ApplicationCommandInteraction):
+        """
+        Generate a mid-week RSVP report showing attendance from Monday to Wednesday.
+        Shows who RSVPed and who didn't for each day of the first half of the week.
+        """
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        await inter.response.defer(ephemeral=True)
+        
+        try:
+            guild_id = inter.guild.id
+            
+            # Get the start of the current week (Monday) using Eastern time
+            today_eastern = datetime.now(self.eastern_tz)
+            days_since_monday = today_eastern.weekday()
+            start_of_week = today_eastern - timedelta(days=days_since_monday)
+            monday = start_of_week.date()
+            
+            # Calculate Tuesday and Wednesday
+            tuesday = monday + timedelta(days=1)
+            wednesday = tuesday + timedelta(days=1)
+            
+            # Get RSVP data for Monday through Wednesday
+            date_responses = await database.get_rsvp_responses_for_date_range(guild_id, monday, wednesday)
+            
+            if not date_responses:
+                await inter.edit_original_message(
+                    content="❌ **No Events Found**\n"
+                           "No events were posted for Monday-Wednesday of this week."
+                )
+                return
+            
+            # Get all guild members (excluding bots) for comparison
+            all_members = [member for member in inter.guild.members if not member.bot]
+            all_user_ids = {member.id for member in all_members}
+            
+            # Create the main embed
+            embed = disnake.Embed(
+                title="📊 Mid-Week RSVP Report (Monday-Wednesday)",
+                description=f"RSVP summary for {monday.strftime('%B %d')} - {wednesday.strftime('%B %d, %Y')}",
+                color=disnake.Color.blue(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            
+            # Track overall participation
+            total_events = len(date_responses)
+            overall_participation = {}
+            midweek_totals = {'yes': 0, 'no': 0, 'maybe': 0, 'mobile': 0, 'no_response': 0}
+            
+            # Store all user data for midweek summary
+            all_midweek_users = {'yes': set(), 'no': set(), 'maybe': set(), 'mobile': set(), 'no_response': set()}
+            
+            # Process each day and create compact fields
+            for day_data in date_responses:
+                event_date = day_data['date']
+                event_data = day_data['event_data']
+                day_name = day_data['day_of_week'].capitalize()
+                rsvps = day_data['rsvps']
+                
+                # Organize responses with Discord names
+                day_responses = {'yes': [], 'no': [], 'maybe': [], 'mobile': [], 'no_response': []}
+                
+                # Process RSVP responses with rate limiting
+                print(f"[RATE-LIMIT] Processing {len(rsvps)} RSVP responses for {day_name} midweek report")
+                for rsvp in rsvps:
+                    user_id = rsvp['user_id']
+                    user = inter.guild.get_member(user_id)
+                    
+                    if user:
+                        user_display = f"{user.display_name}"
+                    else:
+                        # Try to fetch user from Discord API
+                        try:
+                            user = await self.bot.fetch_user(user_id)
+                            user_display = f"{user.display_name}"
+                            # Add rate limiting delay
+                            await asyncio.sleep(0.1)  # 100ms delay to respect rate limits
+                        except:
+                            user_display = f"Unknown User"
+                    
+                    response_type = rsvp['response_type']
+                    day_responses[response_type].append(user_display)
+                    all_midweek_users[response_type].add(user_display)
+                
+                # Process users who haven't RSVPed
+                rsvp_user_ids = {rsvp['user_id'] for rsvp in rsvps}
+                no_rsvp_user_ids = all_user_ids - rsvp_user_ids
+                
+                print(f"[RATE-LIMIT] Processing {len(no_rsvp_user_ids)} no-response users for {day_name} midweek report")
+                for user_id in no_rsvp_user_ids:
+                    user = inter.guild.get_member(user_id)
+                    
+                    if user:
+                        user_display = f"{user.display_name}"
+                        day_responses['no_response'].append(user_display)
+                        all_midweek_users['no_response'].add(user_display)
+                    else:
+                        # Try to fetch user from Discord API
+                        try:
+                            user = await self.bot.fetch_user(user_id)
+                            user_display = f"{user.display_name}"
+                            day_responses['no_response'].append(user_display)
+                            all_midweek_users['no_response'].add(user_display)
+                            # Add rate limiting delay
+                            await asyncio.sleep(0.1)  # 100ms delay to respect rate limits
+                        except:
+                            # Skip users we can't fetch (they might have left the server)
+                            continue
+                
+                # Add to midweek totals
+                for response_type, users in day_responses.items():
+                    midweek_totals[response_type] += len(users)
+                
+                # Calculate participation rate
+                participation_rate = round((len(rsvp_user_ids) / len(all_members)) * 100, 1) if all_members else 0
+                
+                # Create header field for this day
+                header_value = f"📅 **{event_date.strftime('%m/%d')}** - {event_data.get('event_name', 'Event')}\n"
+                header_value += f"📊 **Participation**: {participation_rate}% ({len(rsvp_user_ids)}/{len(all_members)})\n"
+                header_value += f"✅ Yes: **{len(day_responses['yes'])}** | 📱 Mobile: **{len(day_responses['mobile'])}** | ❓ Maybe: **{len(day_responses['maybe'])}** | ❌ No: **{len(day_responses['no'])}** | ⏰ No Response: **{len(day_responses['no_response'])}**"
+                
+                embed.add_field(
+                    name=f"📋 {day_name} Summary",
+                    value=header_value,
+                    inline=False
+                )
+                
+                # Create detailed fields showing ALL users (combining response types to stay under field limit)
+                # Positive responses field (Yes + Mobile)
+                positive_users = []
+                if day_responses['yes']:
+                    positive_users.append(f"✅ **Yes ({len(day_responses['yes'])})**: {', '.join(day_responses['yes'])}")
+                if day_responses['mobile']:
+                    positive_users.append(f"📱 **Mobile ({len(day_responses['mobile'])})**: {', '.join(day_responses['mobile'])}")
+                
+                if positive_users:
+                    positive_content = "\n".join(positive_users)
+                    # Split into multiple fields if too long
+                    if len(positive_content) <= 1024:
+                        embed.add_field(
+                            name=f"✅ {day_name} - Attending",
+                            value=positive_content,
+                            inline=False
+                        )
+                    else:
+                        # Split the content intelligently
+                        field_parts = []
+                        current_part = ""
+                        for user_line in positive_users:
+                            if len(current_part + user_line + "\n") <= 1024:
+                                current_part += user_line + "\n"
+                            else:
+                                if current_part:
+                                    field_parts.append(current_part.strip())
+                                current_part = user_line + "\n"
+                        if current_part:
+                            field_parts.append(current_part.strip())
+                        
+                        for i, part in enumerate(field_parts):
+                            embed.add_field(
+                                name=f"✅ {day_name} - Attending" + (f" (Part {i+1})" if len(field_parts) > 1 else ""),
+                                value=part,
+                                inline=False
+                            )
+                
+                # Uncertain/Negative responses field (Maybe + No + No Response)
+                other_users = []
+                if day_responses['maybe']:
+                    other_users.append(f"❓ **Maybe ({len(day_responses['maybe'])})**: {', '.join(day_responses['maybe'])}")
+                if day_responses['no']:
+                    other_users.append(f"❌ **No ({len(day_responses['no'])})**: {', '.join(day_responses['no'])}")
+                if day_responses['no_response']:
+                    other_users.append(f"⏰ **No Response ({len(day_responses['no_response'])})**: {', '.join(day_responses['no_response'])}")
+                
+                if other_users:
+                    other_content = "\n".join(other_users)
+                    # Split into multiple fields if too long
+                    if len(other_content) <= 1024:
+                        embed.add_field(
+                            name=f"❓ {day_name} - Other Responses",
+                            value=other_content,
+                            inline=False
+                        )
+                    else:
+                        # Split the content intelligently
+                        field_parts = []
+                        current_part = ""
+                        for user_line in other_users:
+                            if len(current_part + user_line + "\n") <= 1024:
+                                current_part += user_line + "\n"
+                            else:
+                                if current_part:
+                                    field_parts.append(current_part.strip())
+                                current_part = user_line + "\n"
+                        if current_part:
+                            field_parts.append(current_part.strip())
+                        
+                        for i, part in enumerate(field_parts):
+                            embed.add_field(
+                                name=f"❓ {day_name} - Other Responses" + (f" (Part {i+1})" if len(field_parts) > 1 else ""),
+                                value=part,
+                                inline=False
+                            )
+                
+                # Track overall participation for summary
+                for rsvp in rsvps:
+                    user_id = rsvp['user_id']
+                    response_type = rsvp['response_type']
+                    
+                    if user_id not in overall_participation:
+                        overall_participation[user_id] = {'responses': [], 'total': 0}
+                    
+                    overall_participation[user_id]['responses'].append(response_type)
+                    overall_participation[user_id]['total'] += 1
+            
+            # Add midweek analysis (compact summary)
+            if overall_participation:
+                consistent_attendees = [uid for uid, data in overall_participation.items() 
+                                      if data['total'] == total_events and all(r in ['yes', 'mobile'] for r in data['responses'])]
+                never_responded = len(all_user_ids) - len(overall_participation)
+                
+                # Calculate average participation rate
+                total_possible_responses = len(all_members) * total_events
+                total_actual_responses = sum(midweek_totals[key] for key in ['yes', 'no', 'maybe', 'mobile'])
+                avg_participation = round((total_actual_responses / total_possible_responses) * 100, 1) if total_possible_responses > 0 else 0
+                
+                embed.add_field(
+                    name="📈 Mid-Week Analysis",
+                    value=f"**Consistent Attendees**: {len(consistent_attendees)} (all 3 days 'Yes' or 'Mobile')\n"
+                          f"**Total Members**: {len(all_members)}\n"
+                          f"**Never Responded**: {never_responded}\n"
+                          f"**Average Participation**: {avg_participation}%",
+                    inline=True
+                )
+                
+                embed.add_field(
+                    name="📊 Totals (Mon-Wed)",
+                    value=f"✅ Yes: **{midweek_totals['yes']}**\n"
+                          f"📱 Mobile: **{midweek_totals['mobile']}**\n"
+                          f"❓ Maybe: **{midweek_totals['maybe']}**\n"
+                          f"❌ No: **{midweek_totals['no']}**\n"
+                          f"⏰ No Response: **{midweek_totals['no_response']}**\n"
+                          f"📋 Total Events: **{total_events}**",
+                    inline=True
+                )
+                
+                # Add most active attendees summary for midweek
+                unique_yes = list(all_midweek_users['yes'])
+                unique_mobile = list(all_midweek_users['mobile'])
+                all_attendees = list(set(unique_yes + unique_mobile))
+                
+                if all_attendees:
+                    attendee_summary = "🏆 **Most Active (Mon-Wed)**\n"
+                    if len(all_attendees) <= 25:
+                        attendee_summary += ", ".join(sorted(all_attendees))
+                    else:
+                        attendee_summary += f"{', '.join(sorted(all_attendees)[:25])}\n... and {len(all_attendees) - 25} more"
+                    
+                    embed.add_field(
+                        name="🎯 Active Participants",
+                        value=attendee_summary,
+                        inline=False
+                    )
+            
+            embed.set_footer(text="Use /weekly_rsvp_report for the full week (Mon-Sun) | Admin command")
+            
+            await inter.edit_original_message(embed=embed)
+            
+        except Exception as e:
+            print(f"Error generating mid-week RSVP report for guild {inter.guild.id}: {e}")
+            await inter.edit_original_message(
+                content=f"❌ **Error Generating Report**\n"
+                       f"An error occurred while generating the mid-week report: {str(e)}"
+            )
+
+    @commands.slash_command(
+        name="weekly_rsvp_report",
+        description="View complete RSVP summary for Monday-Sunday of this week (admin only)"
+    )
+    async def weekly_rsvp_report(self, inter: disnake.ApplicationCommandInteraction):
+        """
+        Generate a full weekly RSVP report showing attendance from Monday to Sunday.
+        Shows who RSVPed and who didn't for each day of the entire week.
+        """
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        await inter.response.defer(ephemeral=True)
+        
+        try:
+            guild_id = inter.guild.id
+            
+            # Get the start of the current week (Monday) using Eastern time
+            today_eastern = datetime.now(self.eastern_tz)
+            days_since_monday = today_eastern.weekday()
+            start_of_week = today_eastern - timedelta(days=days_since_monday)
+            monday = start_of_week.date()
+            
+            # Calculate Sunday (end of week)
+            sunday = monday + timedelta(days=6)
+            
+            # Get RSVP data for the entire week
+            date_responses = await database.get_rsvp_responses_for_date_range(guild_id, monday, sunday)
+            
+            if not date_responses:
+                await inter.edit_original_message(
+                    content="❌ **No Events Found**\n"
+                           "No events were posted for this week."
+                )
+                return
+            
+            # Get all guild members (excluding bots) for comparison
+            all_members = [member for member in inter.guild.members if not member.bot]
+            all_user_ids = {member.id for member in all_members}
+            
+            # Create the main embed
+            embed = disnake.Embed(
+                title="📊 Weekly RSVP Report (Monday-Sunday)",
+                description=f"Complete RSVP summary for {monday.strftime('%B %d')} - {sunday.strftime('%B %d, %Y')}",
+                color=disnake.Color.green(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            
+            # Track overall participation
+            total_events = len(date_responses)
+            overall_participation = {}
+            week_totals = {'yes': 0, 'no': 0, 'maybe': 0, 'mobile': 0, 'no_response': 0}
+            
+            # Store all user data for week summary
+            all_week_users = {'yes': set(), 'no': set(), 'maybe': set(), 'mobile': set(), 'no_response': set()}
+            
+            # Process each day and create compact fields
+            for day_data in date_responses:
+                event_date = day_data['date']
+                event_data = day_data['event_data']
+                day_name = day_data['day_of_week'].capitalize()
+                rsvps = day_data['rsvps']
+                
+                # Organize responses with Discord names
+                day_responses = {'yes': [], 'no': [], 'maybe': [], 'mobile': [], 'no_response': []}
+                
+                # Process RSVP responses with rate limiting
+                print(f"[RATE-LIMIT] Processing {len(rsvps)} RSVP responses for {day_name} weekly report")
+                for rsvp in rsvps:
+                    user_id = rsvp['user_id']
+                    user = inter.guild.get_member(user_id)
+                    
+                    if user:
+                        user_display = f"{user.display_name}"
+                    else:
+                        # Try to fetch user from Discord API
+                        try:
+                            user = await self.bot.fetch_user(user_id)
+                            user_display = f"{user.display_name}"
+                            # Add rate limiting delay
+                            await asyncio.sleep(0.1)  # 100ms delay to respect rate limits
+                        except:
+                            user_display = f"Unknown User"
+                    
+                    response_type = rsvp['response_type']
+                    day_responses[response_type].append(user_display)
+                    all_week_users[response_type].add(user_display)
+                
+                # Process users who haven't RSVPed
+                rsvp_user_ids = {rsvp['user_id'] for rsvp in rsvps}
+                no_rsvp_user_ids = all_user_ids - rsvp_user_ids
+                
+                print(f"[RATE-LIMIT] Processing {len(no_rsvp_user_ids)} no-response users for {day_name} weekly report")
+                for user_id in no_rsvp_user_ids:
+                    user = inter.guild.get_member(user_id)
+                    
+                    if user:
+                        user_display = f"{user.display_name}"
+                        day_responses['no_response'].append(user_display)
+                        all_week_users['no_response'].add(user_display)
+                    else:
+                        # Try to fetch user from Discord API
+                        try:
+                            user = await self.bot.fetch_user(user_id)
+                            user_display = f"{user.display_name}"
+                            day_responses['no_response'].append(user_display)
+                            all_week_users['no_response'].add(user_display)
+                            # Add rate limiting delay
+                            await asyncio.sleep(0.1)  # 100ms delay to respect rate limits
+                        except:
+                            # Skip users we can't fetch (they might have left the server)
+                            continue
+                
+                # Add to week totals
+                for response_type, users in day_responses.items():
+                    week_totals[response_type] += len(users)
+                
+                # Calculate participation rate
+                participation_rate = round((len(rsvp_user_ids) / len(all_members)) * 100, 1) if all_members else 0
+                
+                # Create header field for this day
+                header_value = f"📅 **{event_date.strftime('%m/%d')}** - {event_data.get('event_name', 'Event')}\n"
+                header_value += f"📊 **Participation**: {participation_rate}% ({len(rsvp_user_ids)}/{len(all_members)})\n"
+                header_value += f"✅ Yes: **{len(day_responses['yes'])}** | 📱 Mobile: **{len(day_responses['mobile'])}** | ❓ Maybe: **{len(day_responses['maybe'])}** | ❌ No: **{len(day_responses['no'])}** | ⏰ No Response: **{len(day_responses['no_response'])}**"
+                
+                embed.add_field(
+                    name=f"📋 {day_name} Summary",
+                    value=header_value,
+                    inline=False
+                )
+                
+                # Create detailed fields showing ALL users (combining response types to stay under field limit)
+                # Positive responses field (Yes + Mobile)
+                positive_users = []
+                if day_responses['yes']:
+                    positive_users.append(f"✅ **Yes ({len(day_responses['yes'])})**: {', '.join(day_responses['yes'])}")
+                if day_responses['mobile']:
+                    positive_users.append(f"📱 **Mobile ({len(day_responses['mobile'])})**: {', '.join(day_responses['mobile'])}")
+                
+                if positive_users:
+                    positive_content = "\n".join(positive_users)
+                    # Split into multiple fields if too long
+                    if len(positive_content) <= 1024:
+                        embed.add_field(
+                            name=f"✅ {day_name} - Attending",
+                            value=positive_content,
+                            inline=False
+                        )
+                    else:
+                        # Split the content intelligently
+                        field_parts = []
+                        current_part = ""
+                        for user_line in positive_users:
+                            if len(current_part + user_line + "\n") <= 1024:
+                                current_part += user_line + "\n"
+                            else:
+                                if current_part:
+                                    field_parts.append(current_part.strip())
+                                current_part = user_line + "\n"
+                        if current_part:
+                            field_parts.append(current_part.strip())
+                        
+                        for i, part in enumerate(field_parts):
+                            embed.add_field(
+                                name=f"✅ {day_name} - Attending" + (f" (Part {i+1})" if len(field_parts) > 1 else ""),
+                                value=part,
+                                inline=False
+                            )
+                
+                # Uncertain/Negative responses field (Maybe + No + No Response)
+                other_users = []
+                if day_responses['maybe']:
+                    other_users.append(f"❓ **Maybe ({len(day_responses['maybe'])})**: {', '.join(day_responses['maybe'])}")
+                if day_responses['no']:
+                    other_users.append(f"❌ **No ({len(day_responses['no'])})**: {', '.join(day_responses['no'])}")
+                if day_responses['no_response']:
+                    other_users.append(f"⏰ **No Response ({len(day_responses['no_response'])})**: {', '.join(day_responses['no_response'])}")
+                
+                if other_users:
+                    other_content = "\n".join(other_users)
+                    # Split into multiple fields if too long
+                    if len(other_content) <= 1024:
+                        embed.add_field(
+                            name=f"❓ {day_name} - Other Responses",
+                            value=other_content,
+                            inline=False
+                        )
+                    else:
+                        # Split the content intelligently
+                        field_parts = []
+                        current_part = ""
+                        for user_line in other_users:
+                            if len(current_part + user_line + "\n") <= 1024:
+                                current_part += user_line + "\n"
+                            else:
+                                if current_part:
+                                    field_parts.append(current_part.strip())
+                                current_part = user_line + "\n"
+                        if current_part:
+                            field_parts.append(current_part.strip())
+                        
+                        for i, part in enumerate(field_parts):
+                            embed.add_field(
+                                name=f"❓ {day_name} - Other Responses" + (f" (Part {i+1})" if len(field_parts) > 1 else ""),
+                                value=part,
+                                inline=False
+                            )
+                
+                # Track overall participation for summary
+                for rsvp in rsvps:
+                    user_id = rsvp['user_id']
+                    response_type = rsvp['response_type']
+                    
+                    if user_id not in overall_participation:
+                        overall_participation[user_id] = {'responses': [], 'total': 0}
+                    
+                    overall_participation[user_id]['responses'].append(response_type)
+                    overall_participation[user_id]['total'] += 1
+            
+            # Add weekly analysis (compact summary)
+            if overall_participation:
+                perfect_attendance = [uid for uid, data in overall_participation.items() 
+                                    if data['total'] == total_events and all(r in ['yes', 'mobile'] for r in data['responses'])]
+                
+                good_attendance = [uid for uid, data in overall_participation.items() 
+                                 if data['total'] >= max(1, total_events * 0.7) and 
+                                 sum(1 for r in data['responses'] if r in ['yes', 'mobile']) >= max(1, data['total'] * 0.7)]
+                
+                never_responded = len(all_user_ids) - len(overall_participation)
+                
+                # Calculate average participation rate
+                total_possible_responses = len(all_members) * total_events
+                total_actual_responses = sum(week_totals[key] for key in ['yes', 'no', 'maybe', 'mobile'])
+                avg_participation = round((total_actual_responses / total_possible_responses) * 100, 1) if total_possible_responses > 0 else 0
+                
+                embed.add_field(
+                    name="📈 Weekly Analysis",
+                    value=f"**Perfect Attendance**: {len(perfect_attendance)} members\n"
+                          f"**Good Attendance (70%+)**: {len(good_attendance)} members\n"
+                          f"**Never Responded**: {never_responded} members\n"
+                          f"**Average Participation**: {avg_participation}%",
+                    inline=True
+                )
+                
+                embed.add_field(
+                    name="📊 Week Totals",
+                    value=f"✅ Yes: **{week_totals['yes']}**\n"
+                          f"📱 Mobile: **{week_totals['mobile']}**\n"
+                          f"❓ Maybe: **{week_totals['maybe']}**\n"
+                          f"❌ No: **{week_totals['no']}**\n"
+                          f"⏰ No Response: **{week_totals['no_response']}**\n"
+                          f"📋 Total Events: **{total_events}**",
+                    inline=True
+                )
+                
+                # Add most active attendees summary
+                unique_yes = list(all_week_users['yes'])
+                unique_mobile = list(all_week_users['mobile'])
+                all_attendees = list(set(unique_yes + unique_mobile))
+                
+                if all_attendees:
+                    attendee_summary = "🏆 **Most Active This Week**\n"
+                    if len(all_attendees) <= 20:
+                        attendee_summary += ", ".join(sorted(all_attendees))
+                    else:
+                        attendee_summary += f"{', '.join(sorted(all_attendees)[:20])}\n... and {len(all_attendees) - 20} more"
+                    
+                    embed.add_field(
+                        name="🎯 Active Participants",
+                        value=attendee_summary,
+                        inline=False
+                    )
+            
+            embed.set_footer(text="Use /midweek_rsvp_report for Mon-Wed summary only | Admin command")
+            
+            await inter.edit_original_message(embed=embed)
+            
+        except Exception as e:
+            print(f"Error generating weekly RSVP report for guild {inter.guild.id}: {e}")
+            await inter.edit_original_message(
+                content=f"❌ **Error Generating Report**\n"
+                       f"An error occurred while generating the weekly report: {str(e)}"
+            )
+
+    @commands.slash_command(
         name="force_post_rsvp",
         description="Manually post today's RSVP if it didn't post automatically (admin only)"
     )
@@ -1882,7 +2599,6 @@ class ScheduleCog(commands.Cog):
                 pass  # If this fails, continue anyway
             
             # Run database queries in parallel for speed
-            import asyncio
             existing_post_task = database.get_daily_post(guild_id, today)
             guild_settings_task = database.get_guild_settings(guild_id)
             current_week_task = self.check_current_week_setup(guild_id)
@@ -2944,15 +3660,15 @@ class ScheduleCog(commands.Cog):
             )
             
             # Task status
-            daily_task_running = not self.daily_posting_task.is_being_cancelled() and not self.daily_posting_task.done()
-            reminder_task_running = not self.reminder_check_task.is_being_cancelled() and not self.reminder_check_task.done()
+            daily_task_running = self.daily_posting_task.is_running()
+            reminder_task_running = self.reminder_check_task.is_running()
             
             embed.add_field(
                 name="🔄 Task Status",
                 value=f"**Daily Task Running:** {'✅ YES' if daily_task_running else '❌ NO'}\n"
                       f"**Reminder Task Running:** {'✅ YES' if reminder_task_running else '❌ NO'}\n"
                       f"**Daily Task Cancelled:** {'❌ YES' if self.daily_posting_task.is_being_cancelled() else '✅ NO'}\n"
-                      f"**Daily Task Done:** {'⚠️ YES' if self.daily_posting_task.done() else '✅ NO'}",
+                      f"**Reminder Task Cancelled:** {'❌ YES' if self.reminder_check_task.is_being_cancelled() else '✅ NO'}",
                 inline=False
             )
             
@@ -3085,14 +3801,13 @@ class ScheduleCog(commands.Cog):
         
         try:
             # Get current task status
-            task_running = not self.daily_posting_task.is_being_cancelled() and not self.daily_posting_task.done()
+            task_running = self.daily_posting_task.is_running()
             task_cancelled = self.daily_posting_task.is_being_cancelled()
-            task_done = self.daily_posting_task.done()
             
-            status_before = f"Running: {task_running}, Cancelled: {task_cancelled}, Done: {task_done}"
+            status_before = f"Running: {task_running}, Cancelled: {task_cancelled}"
             
             # Cancel the current task if it exists
-            if not self.daily_posting_task.done():
+            if self.daily_posting_task.is_running():
                 self.daily_posting_task.cancel()
                 print(f"[RESTART] Cancelled existing daily posting task")
             
@@ -3104,11 +3819,10 @@ class ScheduleCog(commands.Cog):
             print(f"[RESTART] Started new daily posting task")
             
             # Get new status
-            new_task_running = not self.daily_posting_task.is_being_cancelled() and not self.daily_posting_task.done()
+            new_task_running = self.daily_posting_task.is_running()
             new_task_cancelled = self.daily_posting_task.is_being_cancelled()
-            new_task_done = self.daily_posting_task.done()
             
-            status_after = f"Running: {new_task_running}, Cancelled: {new_task_cancelled}, Done: {new_task_done}"
+            status_after = f"Running: {new_task_running}, Cancelled: {new_task_cancelled}"
             
             await inter.edit_original_message(
                 f"✅ **Daily Task Restarted**\n\n"
@@ -3234,6 +3948,348 @@ class ScheduleCog(commands.Cog):
                 f"❌ **Error in Rate Limit Analysis**\n"
                 f"Error: {str(e)}"
             )
- 
+
+    @commands.slash_command(
+        name="debug_reminders",
+        description="Debug why reminders are not being sent (admin only)"
+    )
+    async def debug_reminders(self, inter: disnake.ApplicationCommandInteraction):
+        """Debug the reminder system to identify issues"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        await inter.response.defer(ephemeral=True)
+        
+        try:
+            guild_id = inter.guild.id
+            now_eastern = datetime.now(self.eastern_tz)
+            today = now_eastern.date()
+            
+            # Create debug embed
+            embed = disnake.Embed(
+                title="🔍 Debug: Reminder System",
+                description=f"Diagnosing reminder issues for **{inter.guild.name}**",
+                color=disnake.Color.yellow()
+            )
+            
+            # Current time info
+            embed.add_field(
+                name="⏰ Current Time Information",
+                value=f"**Eastern Time:** {now_eastern.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
+                      f"**Today's Date:** {today.isoformat()}\n"
+                      f"**Current Hour:** {now_eastern.hour}\n"
+                      f"**Current Minute:** {now_eastern.minute}",
+                inline=False
+            )
+            
+            # Check reminder task status
+            reminder_task_running = self.reminder_check_task.is_running()
+            
+            embed.add_field(
+                name="🔄 Reminder Task Status",
+                value=f"**Task Running:** {'✅ YES' if reminder_task_running else '❌ NO'}\n"
+                      f"**Task Cancelled:** {'❌ YES' if self.reminder_check_task.is_being_cancelled() else '✅ NO'}\n"
+                      f"**Current Iteration:** {self.reminder_check_task.current_loop if hasattr(self.reminder_check_task, 'current_loop') else 'N/A'}\n"
+                      f"**Runs Every:** 5 minutes",
+                inline=False
+            )
+            
+            # Get guild settings
+            guild_settings = await database.get_guild_settings(guild_id)
+            
+            if not guild_settings:
+                embed.add_field(
+                    name="❌ Guild Settings",
+                    value="No guild settings found. Use `/configure_reminders` to set up.",
+                    inline=False
+                )
+            else:
+                # Display reminder settings
+                reminder_enabled = guild_settings.get('reminder_enabled', True)
+                reminder_4pm = guild_settings.get('reminder_4pm', True)
+                reminder_1_hour = guild_settings.get('reminder_1_hour', True)
+                reminder_15_minutes = guild_settings.get('reminder_15_minutes', True)
+                event_time_str = guild_settings.get('event_time', '20:00:00')
+                
+                try:
+                    event_time = datetime.strptime(event_time_str, '%H:%M:%S').time()
+                    event_time_display = event_time.strftime('%I:%M %p')
+                except:
+                    event_time_display = f"ERROR: {event_time_str}"
+                    event_time = None
+                
+                embed.add_field(
+                    name="🔔 Reminder Settings",
+                    value=f"**Reminders Enabled:** {'✅ YES' if reminder_enabled else '❌ NO'}\n"
+                          f"**4:00 PM Reminder:** {'✅ YES' if reminder_4pm else '❌ NO'}\n"
+                          f"**1 Hour Before:** {'✅ YES' if reminder_1_hour else '❌ NO'}\n"
+                          f"**15 Minutes Before:** {'✅ YES' if reminder_15_minutes else '❌ NO'}\n"
+                          f"**Event Time:** {event_time_display} ET ({event_time_str})",
+                    inline=False
+                )
+                
+                # Calculate reminder times with windows
+                if event_time:
+                    event_today = now_eastern.replace(hour=event_time.hour, minute=event_time.minute, second=0, microsecond=0)
+                    one_hour_before = event_today - timedelta(hours=1)
+                    fifteen_min_before = event_today - timedelta(minutes=15)
+                    
+                    # Check if we're in the reminder windows
+                    in_4pm_window = now_eastern.hour == 16 and now_eastern.minute < 5
+                    in_1h_window = one_hour_before <= now_eastern <= (one_hour_before + timedelta(minutes=4))
+                    in_15m_window = fifteen_min_before <= now_eastern <= (fifteen_min_before + timedelta(minutes=4))
+                    
+                    # Status for each reminder
+                    four_pm_status = "🟡 IN WINDOW" if in_4pm_window else ("🟢 PASSED" if now_eastern.hour > 16 or (now_eastern.hour == 16 and now_eastern.minute >= 5) else "⏳ UPCOMING")
+                    one_h_status = "🟡 IN WINDOW" if in_1h_window else ("🟢 PASSED" if now_eastern > (one_hour_before + timedelta(minutes=4)) else "⏳ UPCOMING")
+                    fifteen_m_status = "🟡 IN WINDOW" if in_15m_window else ("🟢 PASSED" if now_eastern > (fifteen_min_before + timedelta(minutes=4)) else "⏳ UPCOMING")
+                    
+                    embed.add_field(
+                        name="⏰ Reminder Times & Windows (Today)",
+                        value=f"**4:00 PM (4:00-4:04 PM):** {four_pm_status}\n"
+                              f"**1H Before ({one_hour_before.strftime('%I:%M')}-{(one_hour_before + timedelta(minutes=4)).strftime('%I:%M %p')}):** {one_h_status}\n"
+                              f"**15M Before ({fifteen_min_before.strftime('%I:%M')}-{(fifteen_min_before + timedelta(minutes=4)).strftime('%I:%M %p')}):** {fifteen_m_status}",
+                        inline=False
+                    )
+            
+            # Check if guild shows up in reminder query
+            guilds_data = await database.get_guilds_needing_reminders()
+            guild_in_query = any(g['guild_id'] == guild_id for g in guilds_data)
+            
+            embed.add_field(
+                name="🔍 Database Query",
+                value=f"**Guild in Reminder Query:** {'✅ YES' if guild_in_query else '❌ NO'}\n"
+                      f"**Total Guilds in Query:** {len(guilds_data)}\n"
+                      f"**Note:** Guilds must have weekly_schedules entry to appear",
+                inline=False
+            )
+            
+            # Check today's post
+            post_data = await database.get_daily_post(guild_id, today)
+            
+            if not post_data:
+                embed.add_field(
+                    name="❌ Today's Event Post",
+                    value="No daily post found for today. Reminders need an active event post.\n"
+                          "Use `/force_post_rsvp` to create today's post.",
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="✅ Today's Event Post",
+                    value=f"**Post ID:** {post_data['id']}\n"
+                          f"**Event:** {post_data['event_data'].get('event_name', 'Unknown')}\n"
+                          f"**Channel:** <#{post_data['channel_id']}>\n"
+                          f"**Message ID:** {post_data['message_id']}",
+                    inline=False
+                )
+                
+                # Check which reminders have been sent
+                reminder_4pm_sent = await database.check_reminder_sent(post_data['id'], '4pm')
+                reminder_1h_sent = await database.check_reminder_sent(post_data['id'], '1_hour')
+                reminder_15m_sent = await database.check_reminder_sent(post_data['id'], '15_minutes')
+                
+                embed.add_field(
+                    name="📤 Reminders Already Sent",
+                    value=f"**4:00 PM:** {'✅ SENT' if reminder_4pm_sent else '❌ NOT SENT'}\n"
+                          f"**1 Hour Before:** {'✅ SENT' if reminder_1h_sent else '❌ NOT SENT'}\n"
+                          f"**15 Minutes Before:** {'✅ SENT' if reminder_15m_sent else '❌ NOT SENT'}",
+                    inline=False
+                )
+            
+            # Check duplicate prevention tracking
+            tracking_4pm = (guild_id, '4pm') in self.last_reminder_times
+            tracking_1h = (guild_id, '1_hour') in self.last_reminder_times
+            tracking_15m = (guild_id, '15_minutes') in self.last_reminder_times
+            
+            embed.add_field(
+                name="🛡️ Duplicate Prevention",
+                value=f"**4PM Tracked:** {'✅ YES' if tracking_4pm else '❌ NO'}\n"
+                      f"**1H Tracked:** {'✅ YES' if tracking_1h else '❌ NO'}\n"
+                      f"**15M Tracked:** {'✅ YES' if tracking_15m else '❌ NO'}\n"
+                      f"**Note:** These reset when bot restarts",
+                inline=False
+            )
+            
+            # Provide recommendations
+            recommendations = []
+            if not reminder_task_running:
+                recommendations.append("• Restart the bot to fix the reminder task")
+            if not guild_settings:
+                recommendations.append("• Configure reminders with `/configure_reminders`")
+            elif not guild_settings.get('reminder_enabled', True):
+                recommendations.append("• Enable reminders with `/configure_reminders enabled:True`")
+            if not guild_in_query:
+                recommendations.append("• Set up weekly schedule with `/setup_weekly_schedule`")
+            if not post_data:
+                recommendations.append("• Create today's event post with `/force_post_rsvp`")
+            if not guild_settings or not guild_settings.get('event_channel_id'):
+                recommendations.append("• Set event channel with `/set_event_channel`")
+            
+            if recommendations:
+                embed.add_field(
+                    name="💡 Recommendations",
+                    value="\n".join(recommendations),
+                    inline=False
+                )
+            else:
+                # If everything looks good, show next steps
+                next_reminder = "No more reminders today"
+                if event_time:
+                    event_today = now_eastern.replace(hour=event_time.hour, minute=event_time.minute, second=0, microsecond=0)
+                    
+                    # Check upcoming reminder windows
+                    if now_eastern.hour < 16:
+                        next_reminder = "4:00-4:04 PM today"
+                    elif now_eastern < (event_today - timedelta(hours=1)):
+                        one_hour_before = event_today - timedelta(hours=1)
+                        next_reminder = f"{one_hour_before.strftime('%I:%M')}-{(one_hour_before + timedelta(minutes=4)).strftime('%I:%M %p')} today (1 hour before)"
+                    elif now_eastern < (event_today - timedelta(minutes=15)):
+                        fifteen_min_before = event_today - timedelta(minutes=15)
+                        next_reminder = f"{fifteen_min_before.strftime('%I:%M')}-{(fifteen_min_before + timedelta(minutes=4)).strftime('%I:%M %p')} today (15 minutes before)"
+                
+                embed.add_field(
+                    name="✅ System Looks Good",
+                    value=f"Everything appears to be configured correctly.\n"
+                          f"**Next Reminder Window:** {next_reminder}\n"
+                          f"**Check Console:** Look for `[REMINDER]` logs every 5 minutes",
+                    inline=False
+                )
+            
+            embed.set_footer(text="Monitor console logs for [REMINDER] messages to see task activity")
+            
+            await inter.edit_original_message(embed=embed)
+            
+        except Exception as e:
+            await inter.edit_original_message(
+                f"❌ **Error in Debug Command**\n"
+                f"An error occurred while debugging reminders: {str(e)}"
+            )
+
+    @commands.slash_command(
+        name="test_reminder",
+        description="Manually trigger reminder check for testing (admin only)"
+    )
+    async def test_reminder(self, inter: disnake.ApplicationCommandInteraction):
+        """Manually trigger the reminder check for testing"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        await inter.response.send_message(
+            "🔄 **Testing Reminder System**\n"
+            "Manually triggering reminder check... Watch the console for `[REMINDER]` logs.",
+            ephemeral=True
+        )
+        
+        try:
+            # Manually call the reminder check
+            await self.check_and_send_reminders()
+            
+        except Exception as e:
+            print(f"[TEST] Error in manual reminder check: {e}")
+            traceback.print_exc()
+            
+            await inter.edit_original_message(
+                f"❌ **Test Failed**\n"
+                f"Error during manual reminder check: {str(e)}\n"
+                f"Check console logs for details."
+            )
+            return
+        
+        await inter.edit_original_message(
+            "✅ **Test Complete**\n"
+            "Manual reminder check finished. Check the console for `[REMINDER]` debug logs to see what happened."
+        )
+
+    @commands.slash_command(
+        name="reset_reminder_tracking",
+        description="Reset reminder tracking to allow testing reminders again today (admin only)"
+    )
+    async def reset_reminder_tracking(self, inter: disnake.ApplicationCommandInteraction):
+        """Reset reminder tracking for testing purposes"""
+        # Check permissions
+        if not check_admin_or_specific_user(inter):
+            await inter.response.send_message(
+                "❌ You don't have permission to use this command.",
+                ephemeral=True
+            )
+            return
+        
+        await inter.response.defer(ephemeral=True)
+        
+        try:
+            guild_id = inter.guild.id
+            today = datetime.now(self.eastern_tz).date()
+            
+            # Get today's post
+            post_data = await database.get_daily_post(guild_id, today)
+            
+            if not post_data:
+                await inter.edit_original_message(
+                    "❌ **No Event Post Found**\n"
+                    "No daily event post found for today. Create one with `/force_post_rsvp` first."
+                )
+                return
+            
+            # Clear in-memory tracking for this guild
+            keys_to_remove = []
+            for key in self.last_reminder_times.keys():
+                if key[0] == guild_id:  # key is (guild_id, reminder_type)
+                    keys_to_remove.append(key)
+            
+            for key in keys_to_remove:
+                del self.last_reminder_times[key]
+            
+            # Clear database tracking for today's post
+            await database.clear_reminder_tracking(post_data['id'])
+            
+            embed = disnake.Embed(
+                title="🔄 Reminder Tracking Reset",
+                description="Reminder tracking has been cleared for testing purposes.",
+                color=disnake.Color.green()
+            )
+            
+            embed.add_field(
+                name="✅ What Was Reset",
+                value=f"• In-memory duplicate prevention\n"
+                      f"• Database reminder sent tracking\n"
+                      f"• Post ID: {post_data['id']}\n"
+                      f"• Event: {post_data['event_data'].get('event_name', 'Unknown')}",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="🧪 Testing Reminders",
+                value="You can now test reminders by:\n"
+                      "• Using `/test_reminder` to manually trigger checks\n"
+                      "• Waiting for the next 5-minute reminder task cycle\n"
+                      "• Checking console for `[REMINDER]` logs",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="⚠️ Important Note",
+                value="This is for testing only. In normal operation, each reminder should only be sent once per day.",
+                inline=False
+            )
+            
+            await inter.edit_original_message(embed=embed)
+            
+        except Exception as e:
+            await inter.edit_original_message(
+                f"❌ **Error Resetting Tracking**\n"
+                f"An error occurred: {str(e)}"
+            )
+
 def setup(bot):
     bot.add_cog(ScheduleCog(bot)) 

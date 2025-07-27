@@ -722,6 +722,29 @@ async def check_reminder_sent(post_id: str, reminder_type: str) -> bool:
     }
     return _check_record_exists('reminder_sends', conditions)
 
+async def clear_reminder_tracking(post_id: str) -> bool:
+    """
+    Clear all reminder tracking for a specific post (for testing purposes).
+    
+    Args:
+        post_id: UUID of the daily post
+    
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        client = get_supabase_client()
+        
+        # Delete all reminder records for this post
+        result = client.table('reminder_sends').delete().eq('post_id', post_id).execute()
+        
+        print(f"Cleared {len(result.data) if result.data else 0} reminder tracking records for post {post_id}")
+        return True
+        
+    except Exception as e:
+        print(f"Error clearing reminder tracking for post {post_id}: {e}")
+        return False
+
 async def get_guilds_needing_reminders() -> List[dict]:
     """
     Get all guilds that have events today and need reminders sent.
@@ -813,6 +836,55 @@ async def delete_daily_post(post_id: str) -> bool:
     except Exception as e:
         print(f"Error deleting daily post {post_id}: {e}")
         return False
+
+async def get_rsvp_responses_for_date_range(guild_id: int, start_date: date, end_date: date) -> List[dict]:
+    """
+    Get aggregated RSVP responses for all posts in a date range.
+    If a user has multiple RSVPs for the same date, returns their most recent response per date.
+    
+    Args:
+        guild_id: Discord guild ID
+        start_date: Start date of the range (inclusive)
+        end_date: End date of the range (inclusive)
+    
+    Returns:
+        List of dictionaries with date, user responses, and event info
+    """
+    try:
+        client = get_supabase_client()
+        
+        # Get all posts in the date range
+        result = client.table('daily_posts').select('*').eq('guild_id', guild_id).gte('event_date', start_date.isoformat()).lte('event_date', end_date.isoformat()).order('event_date').execute()
+        
+        if not result.data:
+            return []
+        
+        # Parse event_data JSON for all posts
+        posts = _parse_event_data_json(result.data)
+        
+        # Get RSVPs for each date
+        date_responses = []
+        for post in posts:
+            post_date = datetime.fromisoformat(post['event_date']).date()
+            
+            # Get all posts for this date (in case there are multiple)
+            all_posts_for_date = await get_all_daily_posts_for_date(guild_id, post_date)
+            
+            # Get aggregated RSVP responses for this date
+            rsvps = await get_aggregated_rsvp_responses_for_date(guild_id, post_date)
+            
+            date_responses.append({
+                'date': post_date,
+                'event_data': post['event_data'],
+                'day_of_week': post['day_of_week'],
+                'rsvps': rsvps
+            })
+        
+        return date_responses
+        
+    except Exception as e:
+        print(f"Error getting RSVP responses for date range {start_date} to {end_date} in guild {guild_id}: {e}")
+        return []
 
 async def get_all_guilds_with_daily_posts() -> List[int]:
     """

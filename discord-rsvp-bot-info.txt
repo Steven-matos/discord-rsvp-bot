@@ -51,6 +51,8 @@ QUICK START GUIDE
 CORE COMMANDS - GETTING STARTED
 -------------------------------
 
+Commands in this section are available through `/list_commands` for everyday bot usage.
+
 /setup_weekly_schedule
 • Interactive setup for your weekly events
 • Configure each day with event name, outfit/gear, and vehicle
@@ -92,70 +94,79 @@ MEMBER INTERACTION COMMANDS
 
 /view_rsvps
 • See who's attending today's event
-• Shows Yes/No/Maybe/Mobile responses
-• Displays non-responders
+• Shows Yes/No/Maybe/Mobile responses with member names
+• Displays non-responders with member names
 
 /view_yesterday_rsvps
 • Review attendance from previous day
+• Shows member names for all response types
 • Great for tracking participation trends
 
-ADMIN & TROUBLESHOOTING COMMANDS
--------------------------------
+ADVANCED REPORTING COMMANDS (ADMIN ONLY)
+----------------------------------------
 
-/force_post_rsvp
-• Manually post today's RSVP if automatic posting fails
-• Shows progress updates during posting
+/midweek_rsvp_report
+• Comprehensive Monday-Wednesday RSVP analysis
+• Shows actual member names for each response type
+• Day-by-day breakdown with participation rates
+• Identifies consistent attendees across 3 days
+• Smart name display (up to 10 names per category)
+• Visual separation between days for easy reading
 
-/delete_message <message_id>
-• Remove specific messages by ID
-• Useful for cleaning up mistakes
+/weekly_rsvp_report  
+• Complete weekly RSVP analysis (Monday-Sunday)
+• Compact daily summaries with participation rates
+• Most active attendees list (all unique "Yes" responders)
+• Members who never responded (if >5 people)
+• Perfect attendance tracking
+• Good attendance analysis (70%+ participation)
+• Week totals and comprehensive statistics
+• Deduplicated member lists across multiple days
 
-/cleanup_old_posts
-• Manually remove old event posts
-• Preserves RSVP data while cleaning Discord messages
+COMMAND NAVIGATION
+------------------
 
-/set_admin_channel <channel>
-• Choose where admin notifications are sent
-• Includes alerts about missing weekly schedules
+/list_commands
+• Display main bot commands for everyday use
+• Includes setup, management, and RSVP viewing commands
+• Focuses on regular workflow and operations
 
-/reset_setup
-• Clear stuck weekly schedule setup process
-• Use if setup gets interrupted
+/list_help
+• Show troubleshooting, maintenance, and diagnostic commands
+• Advanced commands for fixing issues and debugging the bot
+• Organized by function: troubleshooting, maintenance, diagnostics, system info
 
-/force_sync  
-• Refresh bot commands if they're not appearing
-• Forces re-registration with Discord
+ADVANCED COMMANDS (Available via /list_help)
+--------------------------------------------
 
-MONITORING & DIAGNOSTICS
-------------------------
+The following commands are accessed through `/list_help` and are organized into categories:
 
-/bot_status
-• Check bot uptime and basic health metrics
-• Connection status and guild count
+TROUBLESHOOTING & FIXES:
+• /force_post_rsvp - Manually post today's RSVP if automatic posting fails (shows progress updates)
+• /reset_setup - Clear stuck weekly schedule setup process (use if setup gets interrupted)
+• /force_sync - Refresh bot commands if they're not appearing (forces re-registration with Discord)
 
-/monitor_status
-• Detailed performance information
-• Memory usage, CPU stats, latency data
+MAINTENANCE & CLEANUP:
+• /delete_message <message_id> - Remove specific messages by ID (useful for cleaning up mistakes)
+• /cleanup_old_posts - Manually remove old event posts (preserves RSVP data while cleaning Discord messages)
+• /set_admin_channel <channel> - Choose where admin notifications are sent (includes alerts about missing weekly schedules)
 
-/test_connection
-• Verify Discord and database connectivity
-• Troubleshoot connection issues
+ADVANCED DIAGNOSTICS:
+• /debug_auto_posting - Diagnose automatic posting problems (shows timing, settings, and schedule status)
+• /test_auto_posting - Manually trigger posting checks with debug logs
+• /restart_daily_task - Restart automatic posting system (use if daily posts stop working)  
+• /rate_limit_status - Check Discord rate limiting status (recommendations for large servers)
+• /debug_view_rsvps - Debug RSVP viewing issues with database query details
+• /debug_reminders - Comprehensive reminder system diagnosis
+• /test_reminder - Manually trigger reminder checks for testing
+• /reset_reminder_tracking - Reset reminder tracking for testing (debugging only)
 
-/debug_auto_posting
-• Diagnose automatic posting problems
-• Shows timing, settings, and schedule status
-
-/restart_daily_task
-• Restart automatic posting system
-• Use if daily posts stop working
-
-/rate_limit_status
-• Check Discord rate limiting status
-• Recommendations for large servers
-
-/server_settings
-• Display all bot configuration for your server
-• Complete settings overview
+SYSTEM INFORMATION:
+• /bot_status - Check bot uptime and basic health metrics (connection status and guild count)
+• /monitor_status - Detailed performance information (memory usage, CPU stats, latency data)
+• /test_connection - Verify Discord and database connectivity (troubleshoot connection issues)
+• /test_database - Test database connection and show configuration details
+• /server_settings - Display all bot configuration for your server (complete settings overview)
 
 HOW THE RSVP SYSTEM WORKS
 -------------------------
@@ -164,7 +175,8 @@ DAILY WORKFLOW:
 1. Bot automatically posts daily events at your configured time
 2. Members click buttons to RSVP: ✅ Yes | ❌ No | ❓ Maybe | 📱 Mobile
 3. Bot sends reminders based on your settings
-4. Admins can view attendance with /view_rsvps
+4. Admins can view attendance with /view_rsvps (shows member names)
+5. Admins can generate detailed reports with /midweek_rsvp_report and /weekly_rsvp_report
 
 RSVP OPTIONS:
 • YES - "I'm attending the event"
@@ -220,20 +232,20 @@ TROUBLESHOOTING GUIDE
 --------------------
 
 COMMANDS NOT SHOWING:
-1. Use /force_sync to refresh commands
+1. Use /list_help then /force_sync to refresh commands
 2. Check bot permissions in server settings
 3. Wait up to 1 hour for Discord to update
 4. Restart bot if self-hosting
 
 AUTOMATIC POSTING NOT WORKING:
-1. Use /debug_auto_posting to diagnose
+1. Use /list_help then /debug_auto_posting to diagnose
 2. Verify weekly schedule is configured
 3. Check event channel permissions
 4. Confirm posting time settings
-5. Try /restart_daily_task
+5. Try /list_help then /restart_daily_task
 
 RSVP POSTS NOT APPEARING:
-1. Use /force_post_rsvp to post manually  
+1. Use /list_help then /force_post_rsvp to post manually  
 2. Check bot permissions in event channel
 3. Verify current week's schedule is set up
 4. Ensure event channel is configured
@@ -243,15 +255,16 @@ REMINDERS NOT SENDING:
 2. Verify event time is configured
 3. Confirm reminders are enabled
 4. Check bot permissions in event channel
+5. Use /list_help then /debug_reminders for diagnosis
 
 DATABASE ERRORS:
 1. Verify Supabase project is active
 2. Check SUPABASE_URL and SUPABASE_KEY
 3. Confirm database tables are created
-4. Test connection with /test_connection
+4. Use /list_help then /test_connection to verify connectivity
 
 RATE LIMITING ISSUES:
-1. Use /rate_limit_status to check server risk
+1. Use /list_help then /rate_limit_status to check server risk
 2. Avoid frequent /view_rsvps in large servers (500+ members)
 3. Bot includes automatic rate limiting protection
 4. Space out admin commands during peak times
@@ -264,6 +277,16 @@ PERMISSION ERRORS:
 
 ADVANCED FEATURES
 -----------------
+
+COMPREHENSIVE REPORTING SYSTEM:
+• Daily attendance with member names (/view_rsvps)
+• Historical tracking (/view_yesterday_rsvps)  
+• Mid-week analysis with detailed member breakdowns (/midweek_rsvp_report)
+• Full weekly reports with attendance patterns (/weekly_rsvp_report)
+• Smart name truncation to handle large servers
+• Participation rate calculations and trend analysis
+• Consistent attendee identification
+• Non-responder tracking for follow-up
 
 MULTIPLE POSTS PER DAY:
 • Bot handles multiple manual posts for same event
@@ -308,22 +331,28 @@ SECURITY FEATURES
 BEST PRACTICES
 --------------
 1. Set up weekly schedules at start of each week
-2. Monitor bot status regularly with diagnostic commands
-3. Use cleanup commands to maintain channel organization
-4. Test changes with debug commands before events
+2. Monitor bot status regularly with /list_help diagnostic commands
+3. Use /list_help cleanup commands to maintain channel organization
+4. Test changes with /list_help debug commands before events
 5. Keep Supabase project active and updated
-6. Review attendance trends with yesterday RSVP commands
-7. Configure appropriate reminder timing for your community
+6. Review attendance trends with /view_yesterday_rsvps and weekly reports
+7. Use /midweek_rsvp_report on Wednesdays to check early-week engagement
+8. Generate /weekly_rsvp_report on Sundays to analyze full-week participation
+9. Follow up with members who consistently appear in "No Response" lists
+10. Configure appropriate reminder timing for your community
+11. Use the detailed member name reports to identify engagement patterns
+12. Access troubleshooting commands through /list_help for organized problem-solving
 
 SUPPORT & MAINTENANCE
 --------------------
 • Bot includes comprehensive error handling
 • Automatic recovery from connection issues
-• Real-time diagnostic commands available
+• Real-time diagnostic commands available via /list_help
 • Database backups handled by Supabase
 • Performance monitoring and alerting built-in
+• Organized command structure: main commands via /list_commands, advanced via /list_help
 
-For technical support, use the bot's built-in diagnostic commands or check the console logs if self-hosting. The bot provides detailed error messages and troubleshooting guidance for common issues.
+For technical support, use /list_help to access the bot's built-in diagnostic commands or check the console logs if self-hosting. The bot provides detailed error messages and troubleshooting guidance for common issues.
 
 CONCLUSION
 ----------

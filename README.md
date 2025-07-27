@@ -163,8 +163,14 @@ Members can change their mind anytime by clicking a different button.
 ### Viewing Attendance
 
 Anyone can see who's coming to events:
-- **`/view_rsvps`** - See today's RSVPs
-- **`/view_yesterday_rsvps`** - Check yesterday's attendance
+- **`/view_rsvps`** - See today's RSVPs with member names
+- **`/view_yesterday_rsvps`** - Check yesterday's attendance with member names
+
+### Admin Attendance Reports
+
+Admins get powerful reporting tools to track engagement:
+- **`/midweek_rsvp_report`** - Detailed Monday-Wednesday report showing exactly who RSVPed each day, with participation stats and consistent attendee tracking
+- **`/weekly_rsvp_report`** - Comprehensive weekly analysis showing most active members, attendance patterns, and members who need follow-up
 
 ## 🛠️ Admin Commands
 
@@ -182,8 +188,10 @@ Anyone can see who's coming to events:
 | `/delete_message` | Delete a specific message by its message ID | Server Admins + Specific User |
 | `/view_rsvps` | See who's coming today | Everyone |
 | `/view_yesterday_rsvps` | Check yesterday's attendance | Everyone |
-| `/list_commands` | See all available commands | Server Admins + Specific User |
-| `/force_sync` | Fix command display issues | Server Admins + Specific User |
+| `/midweek_rsvp_report` | Get detailed Monday-Wednesday RSVP report with member names | Server Admins + Specific User |
+| `/weekly_rsvp_report` | Get comprehensive weekly RSVP report with attendance analysis | Server Admins + Specific User |
+| `/list_commands` | See main bot commands for everyday use | Server Admins + Specific User |
+| `/list_help` | See troubleshooting, maintenance, and diagnostic commands | Server Admins + Specific User |
 
 ## 🩺 Monitoring & Diagnostics
 
@@ -220,7 +228,7 @@ The bot works automatically once you set it up:
 - Make sure you installed the requirements: `pip install -r requirements.txt`
 
 ### Commands Not Showing Up?
-- Use `/force_sync` to refresh the commands
+- Use `/list_help` to access troubleshooting commands, then use `/force_sync` to refresh
 - Make sure the bot has "Use Slash Commands" permission
 - Wait up to 1 hour for Discord to update
 
@@ -241,7 +249,7 @@ The bot works automatically once you set it up:
 - Verify the bot can send messages in your event channel
 
 ### RSVP Posts Not Appearing?
-- Use `/force_post_rsvp` to manually post today's RSVP (shows progress updates)
+- Use `/list_help` then `/force_post_rsvp` to manually post today's RSVP (shows progress updates)
 - Check bot permissions in the event channel (Send Messages, Embed Links, Manage Messages)
 - Verify the event channel is configured with `/set_event_channel`
 - Ensure the weekly schedule is set up with `/setup_weekly_schedule`

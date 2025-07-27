@@ -66,9 +66,41 @@ Check who showed up yesterday. Great for seeing attendance trends!
 - **Usage**: No parameters needed
 - **Shows**: Previous day's RSVP summary
 
+#### `/midweek_rsvp_report`
+Get a comprehensive RSVP report for Monday through Wednesday of the current week. Shows actual member names who RSVPed and participation stats.
+- **Usage**: No parameters needed
+- **Admin Only**: Yes
+- **Shows**: Day-by-day breakdown with member names for each response type (Yes/No/Maybe/Mobile/No Response), participation rates, consistent attendees, and summary statistics for Mon-Wed
+- **Features**: Smart name truncation (shows up to 10 names per category), visual day separation, detailed attendance tracking
+
+#### `/weekly_rsvp_report`
+Get a complete RSVP report for the entire week (Monday through Sunday). Perfect for analyzing weekly attendance patterns with member identification.
+- **Usage**: No parameters needed  
+- **Admin Only**: Yes
+- **Shows**: Full week breakdown with compact daily summaries, most active attendees list, members who never responded, attendance analysis, participation trends, and comprehensive statistics
+- **Features**: Deduplicated member lists, perfect attendance tracking, good attendance analysis (70%+ participation), week totals
+
 ---
 
-## 🛠️ Troubleshooting & Fixes
+## 🔧 Help & Support
+
+#### `/list_commands`
+Show the main commands menu with everyday bot features.
+- **Usage**: No parameters needed
+- **Shows**: Setup, management, and RSVP viewing commands
+
+#### `/list_help`
+Show troubleshooting, maintenance, and diagnostic commands.
+- **Usage**: No parameters needed  
+- **Shows**: Advanced commands for fixing issues and debugging the bot
+
+---
+
+## 🛠️ Advanced Commands (Available via `/list_help`)
+
+*The following commands are accessed through `/list_help` and are used for troubleshooting, maintenance, and advanced diagnostics.*
+
+### 🛠️ Troubleshooting & Fixes
 
 #### `/force_post_rsvp`
 Didn't get today's event post? Use this to make the bot post it right now.
@@ -80,16 +112,18 @@ Stuck on 'setup already in progress'? This clears the setup state so you can sta
 - **Usage**: No parameters needed
 - **When to use**: If weekly setup gets stuck
 
+#### `/force_sync`
+Commands not showing up when you type '/'? This refreshes everything.
+- **Usage**: No parameters needed
+- **Note**: Forces re-registration of all slash commands
+
+### 🧹 Maintenance & Cleanup
+
 #### `/delete_message <message_id> [channel]`
 Remove any unwanted message by copying its ID. Useful for cleaning up mistakes.
 - **Parameters**: 
   - `message_id` - The Discord message ID to delete
   - `channel` - Optional channel (defaults to current channel)
-
-#### `/force_sync`
-Commands not showing up when you type '/'? This refreshes everything.
-- **Usage**: No parameters needed
-- **Note**: Forces re-registration of all slash commands
 
 #### `/cleanup_old_posts`
 Remove old event posts to keep your channel tidy (but keeps all the RSVP records).
@@ -101,9 +135,7 @@ Choose where the bot sends important alerts (like 'Hey, you forgot to set up thi
 - **Parameters**: `channel` - Text channel for admin notifications
 - **Example**: `/set_admin_channel #bot-admin`
 
----
-
-## 🔧 Debugging & Diagnostics
+### 🔧 Advanced Diagnostics
 
 #### `/debug_auto_posting`
 Diagnose why automatic daily posts aren't working. Shows timing, settings, and schedule status.
@@ -130,14 +162,24 @@ Debug why view_rsvps isn't finding posts when they exist.
 - **Usage**: No parameters needed
 - **Shows**: Database query details and troubleshooting info
 
----
-
-## 🔧 System & Settings
-
-#### `/list_commands`
-Show the help menu again anytime.
+#### `/debug_reminders`
+Debug why reminders are not being sent out. Shows complete reminder system diagnosis.
 - **Usage**: No parameters needed
-- **Shows**: This documentation in Discord
+- **Shows**: Task status, reminder settings, timing, database queries, duplicate prevention
+- **When to use**: When reminders stop working or aren't being sent
+
+#### `/test_reminder`
+Manually trigger the reminder check system to test if it's working.
+- **Usage**: No parameters needed
+- **Note**: Check console for detailed `[REMINDER]` logs to see what happens
+
+#### `/reset_reminder_tracking`
+Reset reminder tracking to allow testing reminders again today (for debugging).
+- **Usage**: No parameters needed
+- **When to use**: After fixing reminder issues, to test if reminders work without waiting for tomorrow
+- **Warning**: Only for testing - normally each reminder should only be sent once per day
+
+### 🔧 System Information
 
 #### `/bot_status`
 Is the bot working properly? Check here if things seem slow.
@@ -183,23 +225,23 @@ The bot automatically:
 ## 🆘 Common Issues & Solutions
 
 ### Automatic Posting Not Working
-1. Use `/debug_auto_posting` to diagnose
+1. Use `/list_help` then `/debug_auto_posting` to diagnose
 2. Check if current week's schedule is set up
 3. Verify event channel is configured
-4. Try `/restart_daily_task` if task is stuck
+4. Try `/list_help` then `/restart_daily_task` if task is stuck
 
 ### Commands Not Showing
-1. Use `/force_sync` to re-register commands
+1. Use `/list_help` then `/force_sync` to re-register commands
 2. Check bot permissions in server
 3. Restart bot if necessary
 
 ### Rate Limiting (459 Errors)
-1. Use `/rate_limit_status` to check risk level
+1. Use `/list_help` then `/rate_limit_status` to check risk level
 2. Avoid running `/view_rsvps` during peak times if server is large (500+ members)
 3. Bot now includes automatic rate limiting protection
 
 ### RSVP Posts Missing
-1. Use `/force_post_rsvp` to post immediately
+1. Use `/list_help` then `/force_post_rsvp` to post immediately
 2. Check if today's event is configured with `/view_schedule`
 3. Verify bot permissions in event channel
 
