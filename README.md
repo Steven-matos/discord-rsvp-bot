@@ -18,6 +18,7 @@
 - **👑 Admin Access**: Specific user ID can access all admin commands regardless of role
 - **⚡ Performance Optimized**: Advanced caching, database optimization, and background task management
 - **🔒 Security Enhanced**: Advanced rate limiting, threat detection, and comprehensive monitoring
+- **🧹 Automatic Cleanup**: Smart guild data cleanup with activity-based preservation
 
 ## 🚀 Getting Started
 
@@ -194,6 +195,7 @@ Admins get powerful reporting tools to track engagement:
 | `/weekly_rsvp_report` | Get comprehensive weekly RSVP report with attendance analysis | Server Admins + Specific User |
 | `/list_commands` | See main bot commands for everyday use | Server Admins + Specific User |
 | `/list_help` | See troubleshooting, maintenance, and diagnostic commands | Server Admins + Specific User |
+| `/cleanup_guilds` | Manually trigger guild cleanup to remove orphaned data | Server Admins + Specific User |
 
 ## 🩺 Monitoring & Diagnostics
 
@@ -280,6 +282,47 @@ The bot includes advanced performance optimizations following SOLID, DRY, and KI
 - **Compression & Encryption**: Optional compression and encryption
 - **Recovery Tools**: Easy restoration from backups
 
+## 🧹 Automatic Guild Cleanup System
+
+The bot includes an intelligent guild cleanup system that automatically maintains a clean database by removing orphaned data from guilds the bot is no longer a member of.
+
+### 🔄 How It Works
+
+**Automatic Cleanup Triggers:**
+- **Bot Startup**: Compares current guilds with database records
+- **Real-time Detection**: Cleans up immediately when "Guild not found" errors occur
+- **Manual Trigger**: Use `/cleanup_guilds` for on-demand cleanup
+
+**Smart Preservation:**
+- **Activity-Based**: Preserves guilds with recent activity (last 3 weeks by default)
+- **Configurable**: Adjust preservation period via `GUILD_CLEANUP_DAYS_THRESHOLD`
+- **Comprehensive**: Monitors weekly schedules, daily posts, and settings updates
+
+### 📊 What Gets Cleaned
+
+When a guild is removed, **ALL** associated data is deleted:
+- ✅ User RSVP responses
+- ✅ Reminder tracking records
+- ✅ Admin notification history
+- ✅ Daily event posts
+- ✅ Guild configuration settings
+- ✅ Weekly schedule data
+
+### ⚙️ Configuration
+
+Add to your `.env` file:
+```env
+# Guild Cleanup Settings
+GUILD_CLEANUP_DAYS_THRESHOLD=21  # Days to preserve recently active guilds
+```
+
+### 🎯 Benefits
+
+- **Database Efficiency**: Prevents bloat from orphaned data
+- **Performance**: Faster queries with cleaner database
+- **Storage Optimization**: Reduces database storage costs
+- **Data Integrity**: Maintains only relevant, accessible data
+
 ## ⚙️ Advanced Configuration
 
 ### Environment Variables
@@ -305,6 +348,9 @@ BACKUP_ENCRYPTION=false
 MAX_DB_CONNECTIONS=10
 QUERY_CACHE_SIZE=1000
 DB_QUERY_TIMEOUT=30
+
+# Guild Cleanup Settings
+GUILD_CLEANUP_DAYS_THRESHOLD=21  # Days to preserve recently active guilds
 ```
 
 ## 📈 Performance Benefits
@@ -472,7 +518,32 @@ If something isn't working:
 
 ## 🎉 What's New
 
-### Latest Update: Enhanced Database Error Handling ✅
+### Latest Update: Intelligent Guild Cleanup System ✅
+**Automatic database maintenance with smart activity-based preservation.**
+
+#### What Changed:
+- **Automatic Cleanup**: Bot now automatically removes orphaned guild data on startup and in real-time
+- **Smart Preservation**: Guilds with recent activity (last 3 weeks) are preserved to prevent data loss
+- **Real-time Detection**: Immediate cleanup when "Guild not found" errors occur during operations
+- **Comprehensive Coverage**: Removes ALL data from ALL tables for orphaned guilds
+- **Manual Control**: New `/cleanup_guilds` command for on-demand cleanup
+- **Detailed Logging**: Shows exactly what data was cleaned up with verification
+
+#### Technical Improvements:
+- **Activity Monitoring**: Tracks weekly schedule updates, daily posts, and settings changes
+- **Configurable Threshold**: Adjust preservation period via `GUILD_CLEANUP_DAYS_THRESHOLD` environment variable
+- **Verification System**: Confirms complete deletion with detailed reporting
+- **Error Resilience**: Continues operation even if cleanup encounters errors
+- **Performance Optimized**: Parallel processing and efficient database queries
+
+#### Benefits:
+- **Database Efficiency**: Prevents bloat from orphaned data
+- **Storage Optimization**: Reduces database storage costs
+- **Performance**: Faster queries with cleaner database
+- **Data Integrity**: Maintains only relevant, accessible data
+- **Automatic Maintenance**: No manual intervention required
+
+### Previous Update: Enhanced Database Error Handling ✅
 **Replaced cryptic database errors with clear, actionable error messages.**
 
 #### What Changed:

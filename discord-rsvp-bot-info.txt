@@ -17,6 +17,7 @@ KEY FEATURES
 ✅ Automatic Cleanup - Removes old event posts to keep channels tidy
 ✅ Advanced Monitoring - Bot health checks and performance metrics
 ✅ Database Integration - Persistent data storage via Supabase
+✅ Intelligent Cleanup - Automatic guild data cleanup with activity preservation
 
 TECHNICAL REQUIREMENTS
 ---------------------
@@ -173,6 +174,9 @@ PERFORMANCE MONITORING (Admin Only):
 • /performance_metrics - Detailed performance analysis with optimization insights
 • /security_status - Security monitoring and threat detection status
 
+GUILD CLEANUP COMMANDS (Admin Only):
+• /cleanup_guilds - Manually trigger guild cleanup to remove orphaned data
+
 HOW THE RSVP SYSTEM WORKS
 -------------------------
 
@@ -195,6 +199,7 @@ AUTOMATIC FEATURES:
 • Automatic cleanup of old posts
 • Weekly schedule validation
 • Admin notifications for missing schedules
+• Intelligent guild data cleanup with activity preservation
 
 EXAMPLE WEEKLY SCHEDULE
 -----------------------
@@ -283,6 +288,16 @@ PERMISSION ERRORS:
 ADVANCED FEATURES
 -----------------
 
+INTELLIGENT GUILD CLEANUP SYSTEM:
+• Automatic Detection - Bot identifies orphaned guilds on startup and during operations
+• Activity-Based Preservation - Guilds with recent activity (last 3 weeks) are preserved
+• Real-time Cleanup - Immediate cleanup when "Guild not found" errors occur
+• Comprehensive Coverage - Removes ALL data from ALL tables for orphaned guilds
+• Manual Control - Use /cleanup_guilds for on-demand cleanup
+• Detailed Logging - Shows exactly what data was cleaned up with verification
+• Configurable Threshold - Adjust preservation period via GUILD_CLEANUP_DAYS_THRESHOLD
+• Performance Optimized - Parallel processing and efficient database queries
+
 COMPREHENSIVE REPORTING SYSTEM:
 • Daily attendance with member names (/view_rsvps)
 • Historical tracking (/view_yesterday_rsvps)  
@@ -347,6 +362,9 @@ BEST PRACTICES
 10. Configure appropriate reminder timing for your community
 11. Use the detailed member name reports to identify engagement patterns
 12. Access troubleshooting commands through /list_help for organized problem-solving
+13. Use /cleanup_guilds periodically to maintain database efficiency
+14. Monitor guild cleanup logs for orphaned data detection
+15. Configure GUILD_CLEANUP_DAYS_THRESHOLD based on your community's activity patterns
 
 SUPPORT & MAINTENANCE
 --------------------
