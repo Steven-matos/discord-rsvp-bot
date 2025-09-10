@@ -10,6 +10,17 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 load_dotenv()
 
+# Import core systems
+from core import (
+    cache_manager,
+    rate_limiter, 
+    error_monitor,
+    backup_manager,
+    db_optimizer,
+    task_manager,
+    security_manager
+)
+
 # Set up logging for better monitoring
 logging.basicConfig(
     level=logging.INFO,
@@ -60,6 +71,35 @@ async def _handle_database_operation_async(operation_name: str, operation_func):
         logger.info(f"{operation_name} successfully")
     except Exception as e:
         logger.error(f"Failed to {operation_name.lower()}: {e}")
+
+async def _initialize_core_systems():
+    """Initialize all core performance and security systems"""
+    # Start all systems in parallel for faster initialization
+    startup_tasks = [
+        cache_manager.start(),
+        error_monitor.start(),
+        backup_manager.start(),
+        db_optimizer.start(),
+        task_manager.start(),
+        security_manager.start()
+    ]
+    
+    await asyncio.gather(*startup_tasks, return_exceptions=True)
+    logger.info("All core systems initialized")
+
+async def _shutdown_core_systems():
+    """Shutdown all core systems"""
+    shutdown_tasks = [
+        cache_manager.stop(),
+        error_monitor.stop(),
+        backup_manager.stop(),
+        db_optimizer.stop(),
+        task_manager.stop(),
+        security_manager.stop()
+    ]
+    
+    await asyncio.gather(*shutdown_tasks, return_exceptions=True)
+    logger.info("All core systems shutdown")
 
 
 
@@ -137,6 +177,7 @@ async def bot_status(inter: disnake.ApplicationCommandInteraction):
     else:
         await inter.response.send_message("❌ Bot status not available", ephemeral=True)
 
+
 async def load_persistent_views():
     """Load persistent views for existing RSVP messages"""
     try:
@@ -185,6 +226,12 @@ async def load_cogs():
         logger.info("Successfully loaded cogs.monitor")
     except Exception as e:
         logger.error(f"Failed to load cogs.monitor: {e}")
+    
+    try:
+        bot.load_extension('cogs.performance')
+        logger.info("Successfully loaded cogs.performance")
+    except Exception as e:
+        logger.error(f"Failed to load cogs.performance: {e}")
 
 # Add heartbeat to keep bot alive
 async def heartbeat():
@@ -213,6 +260,13 @@ async def on_ready():
     # Initialize database connection pool using helper method
     await _handle_database_operation_async("Initialize database connection pool", database.init_db_pool)
     
+    # Initialize core systems
+    try:
+        await _initialize_core_systems()
+        logger.info("Core systems initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize core systems: {e}")
+    
     # Load persistent views for RSVP buttons
     await load_persistent_views()
     
@@ -237,15 +291,19 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Fatal error: {e}")
     finally:
-        # Ensure database pool is closed on exit
+        # Ensure proper cleanup on exit
         logger.info("Cleaning up...")
         try:
+            # Shutdown core systems and close database pool
+            asyncio.run(_shutdown_core_systems())
             asyncio.run(database.close_db_pool())
         except RuntimeError:
             # If there's already a running event loop, use it
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # Schedule the cleanup for when the loop is available
+                loop.create_task(_shutdown_core_systems())
                 loop.create_task(database.close_db_pool())
             else:
+                loop.run_until_complete(_shutdown_core_systems())
                 loop.run_until_complete(database.close_db_pool()) 

@@ -206,6 +206,26 @@ Show all bot settings configured for this server.
 - **Usage**: No parameters needed
 - **Shows**: Complete configuration overview
 
+### 🚀 Performance Monitoring (Admin Only)
+
+#### `/system_health`
+Get comprehensive system health and performance metrics.
+- **Usage**: No parameters needed
+- **Shows**: Cache performance, database stats, task performance, security status, error summary, rate limiting
+- **Access**: Admin permissions required
+
+#### `/performance_metrics`
+Get detailed performance analysis and optimization insights.
+- **Usage**: No parameters needed
+- **Shows**: Cache utilization, database query times, task success rates, error analysis with recommendations
+- **Access**: Admin permissions required
+
+#### `/security_status`
+Get security monitoring and threat detection status.
+- **Usage**: No parameters needed
+- **Shows**: Security events, threat counts, active rules, recent security events
+- **Access**: Admin permissions required
+
 ---
 
 ## 🔄 Automatic Features

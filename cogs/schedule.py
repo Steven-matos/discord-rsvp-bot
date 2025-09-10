@@ -1121,6 +1121,13 @@ class ScheduleCog(commands.Cog):
             "",
             "**⚙️ `/server_settings`** - Show all bot settings configured for this server.",
             "",
+            "__**🚀 Performance Monitoring**__",
+            "**🏥 `/system_health`** - Get comprehensive system health and performance metrics.",
+            "",
+            "**📈 `/performance_metrics`** - Get detailed performance analysis and optimization insights.",
+            "",
+            "**🔒 `/security_status`** - Get security monitoring and threat detection status.",
+            "",
             "__**📋 Navigation**__",
             "**📋 `/list_commands`** - Return to the main commands list for regular bot features."
         ]

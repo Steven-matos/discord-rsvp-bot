@@ -168,6 +168,11 @@ SYSTEM INFORMATION:
 • /test_database - Test database connection and show configuration details
 • /server_settings - Display all bot configuration for your server (complete settings overview)
 
+PERFORMANCE MONITORING (Admin Only):
+• /system_health - Comprehensive system health and performance metrics dashboard
+• /performance_metrics - Detailed performance analysis with optimization insights
+• /security_status - Security monitoring and threat detection status
+
 HOW THE RSVP SYSTEM WORKS
 -------------------------
 
