@@ -180,60 +180,87 @@ class RSVPView(disnake.ui.View):
         """
         Handle RSVP button clicks with time validation.
         Prevents RSVPs after the event time has passed.
+        
+        Args:
+            inter: The Discord message interaction
+            response_type: The type of RSVP response (yes, no, maybe, mobile)
         """
-        user_id = inter.author.id
-        guild_id = inter.guild.id
-        
-        # Get guild settings to check event time
-        guild_settings = await database.get_guild_settings(guild_id)
-        
-        # Check if event time is set and if current time has passed it
-        if guild_settings and 'event_time' in guild_settings:
-            # Eastern timezone for consistency with event scheduling
-            eastern_tz = pytz.timezone('America/New_York')
-            now_eastern = datetime.now(eastern_tz)
-            today_date = now_eastern.date()
+        try:
+            # Defer the interaction response immediately to prevent timeout
+            await inter.response.defer(ephemeral=True)
             
-            # Parse the event time from guild settings (format: "HH:MM:SS")
-            event_time_str = guild_settings['event_time']
-            try:
-                # Parse the time and combine with today's date
-                event_time = datetime.strptime(event_time_str, '%H:%M:%S').time()
-                event_datetime = datetime.combine(today_date, event_time)
-                event_datetime_eastern = eastern_tz.localize(event_datetime)
+            user_id = inter.author.id
+            guild_id = inter.guild.id
+            
+            # Get guild settings to check event time
+            guild_settings = await database.get_guild_settings(guild_id)
+            
+            # Check if event time is set and if current time has passed it
+            if guild_settings and 'event_time' in guild_settings:
+                # Eastern timezone for consistency with event scheduling
+                eastern_tz = pytz.timezone('America/New_York')
+                now_eastern = datetime.now(eastern_tz)
+                today_date = now_eastern.date()
                 
-                # Check if the event time has passed
-                if now_eastern >= event_datetime_eastern:
-                    # Convert to 12-hour format for user-friendly display
-                    event_time_display = event_time.strftime('%I:%M %p')
-                    await inter.response.send_message(
-                        f"⏰ **RSVP Period Closed**\n"
-                        f"Sorry, you cannot RSVP after the event has started.\n"
-                        f"Today's event started at **{event_time_display} Eastern Time**.\n"
-                        f"Please join us for the next event!",
-                        ephemeral=True
-                    )
-                    return
+                # Parse the event time from guild settings (format: "HH:MM:SS")
+                event_time_str = guild_settings['event_time']
+                try:
+                    # Parse the time and combine with today's date
+                    event_time = datetime.strptime(event_time_str, '%H:%M:%S').time()
+                    event_datetime = datetime.combine(today_date, event_time)
+                    event_datetime_eastern = eastern_tz.localize(event_datetime)
                     
-            except (ValueError, TypeError) as e:
-                # If there's an error parsing the event time, log it but don't block RSVPs
-                print(f"Error parsing event time '{event_time_str}' for guild {guild_id}: {e}")
-        
-        # Save RSVP to database
-        success = await database.save_rsvp_response(self.post_id, user_id, guild_id, response_type)
-        
-        if success:
-            response_emoji = {"yes": "✅", "no": "❌", "maybe": "❓", "mobile": "📱"}[response_type]
-            await inter.response.send_message(
-                f"{response_emoji} **RSVP Updated!**\n"
-                f"Your response has been recorded as: **{response_type.upper()}**",
-                ephemeral=True
-            )
-        else:
-            await inter.response.send_message(
-                "❌ Failed to save your RSVP. Please try again.",
-                ephemeral=True
-            )
+                    # Check if the event time has passed
+                    if now_eastern >= event_datetime_eastern:
+                        # Convert to 12-hour format for user-friendly display
+                        event_time_display = event_time.strftime('%I:%M %p')
+                        await inter.followup.send(
+                            f"⏰ **RSVP Period Closed**\n"
+                            f"Sorry, you cannot RSVP after the event has started.\n"
+                            f"Today's event started at **{event_time_display} Eastern Time**.\n"
+                            f"Please join us for the next event!",
+                            ephemeral=True
+                        )
+                        return
+                        
+                except (ValueError, TypeError) as e:
+                    # If there's an error parsing the event time, log it but don't block RSVPs
+                    print(f"Error parsing event time '{event_time_str}' for guild {guild_id}: {e}")
+            
+            # Save RSVP to database
+            success = await database.save_rsvp_response(self.post_id, user_id, guild_id, response_type)
+            
+            if success:
+                response_emoji = {"yes": "✅", "no": "❌", "maybe": "❓", "mobile": "📱"}[response_type]
+                await inter.followup.send(
+                    f"{response_emoji} **RSVP Updated!**\n"
+                    f"Your response has been recorded as: **{response_type.upper()}**",
+                    ephemeral=True
+                )
+            else:
+                await inter.followup.send(
+                    "❌ Failed to save your RSVP. Please try again.",
+                    ephemeral=True
+                )
+                
+        except disnake.NotFound:
+            # Interaction has expired or been deleted
+            print(f"RSVP interaction expired for user {inter.author.id} in guild {inter.guild.id}")
+        except disnake.HTTPException as e:
+            # Handle HTTP errors (rate limits, etc.)
+            print(f"HTTP error in RSVP handling: {e}")
+        except Exception as e:
+            # Handle any other unexpected errors
+            print(f"Unexpected error in RSVP handling: {e}")
+            try:
+                # Try to send error message if interaction is still valid
+                await inter.followup.send(
+                    "❌ An error occurred while processing your RSVP. Please try again later.",
+                    ephemeral=True
+                )
+            except:
+                # If we can't send a message, just log the error
+                pass
 
 class ScheduleCog(commands.Cog):
     def __init__(self, bot):
