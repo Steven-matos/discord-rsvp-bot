@@ -269,6 +269,32 @@ class ScheduleCog(commands.Cog):
         """Helper method to standardize logging with prefixes"""
         print(f"[{prefix}] {message}")
     
+    async def _cleanup_orphaned_guild(self, guild_id: int, log_prefix: str = "SYSTEM"):
+        """
+        Helper method to clean up orphaned guild data when guild is not found.
+        
+        Args:
+            guild_id: The guild ID to clean up
+            log_prefix: Prefix for logging messages
+        """
+        try:
+            self._log_with_prefix(log_prefix, f"Guild {guild_id} not found, cleaning up orphaned data")
+            cleanup_results = await database.cleanup_orphaned_guild_data([guild_id])
+            
+            if cleanup_results["cleaned_guilds"] > 0:
+                total_deleted = sum(cleanup_results["tables_cleaned"].values())
+                self._log_with_prefix(log_prefix, f"Cleaned {total_deleted} records for orphaned guild {guild_id}")
+                
+                # Log detailed cleanup results
+                for table, count in cleanup_results["tables_cleaned"].items():
+                    if count > 0:
+                        self._log_with_prefix(log_prefix, f"  - {table}: {count} records removed")
+            else:
+                self._log_with_prefix(log_prefix, f"No data found for orphaned guild {guild_id}")
+                
+        except Exception as e:
+            self._log_with_prefix(log_prefix, f"Error cleaning up guild {guild_id}: {e}")
+    
     async def _validate_guild_and_channel(self, guild_id: int, log_prefix: str = "SYSTEM") -> tuple:
         """
         Helper method to validate guild and channel existence.
@@ -277,7 +303,7 @@ class ScheduleCog(commands.Cog):
         # Get guild
         guild = self.bot.get_guild(guild_id)
         if not guild:
-            self._log_with_prefix(log_prefix, f"Guild {guild_id} not found, skipping")
+            await self._cleanup_orphaned_guild(guild_id, log_prefix)
             return None, None, None
         
         # Get guild settings
@@ -446,8 +472,8 @@ class ScheduleCog(commands.Cog):
                     # Get the guild and channel
                     guild = self.bot.get_guild(guild_id)
                     if not guild:
-                        # Guild not found, skip this post
-                        print(f"Guild {guild_id} not found, skipping cleanup")
+                        # Guild not found, clean up orphaned data
+                        await self._cleanup_orphaned_guild(guild_id, "CLEANUP")
                         continue
                     
                     channel = guild.get_channel(channel_id)
@@ -533,7 +559,7 @@ class ScheduleCog(commands.Cog):
             try:
                 guild = self.bot.get_guild(guild_id)
                 if not guild:
-                    self._log_with_prefix("AUTO-POST", f"Guild {guild_id} not found, skipping")
+                    await self._cleanup_orphaned_guild(guild_id, "AUTO-POST")
                     continue
                 
                 # Get guild settings
