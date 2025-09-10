@@ -905,3 +905,288 @@ async def get_all_guilds_with_daily_posts() -> List[int]:
         return guild_ids
     
     return _handle_database_operation(operation, "getting guilds with daily posts", [])
+
+async def get_all_stored_guild_ids() -> List[int]:
+    """
+    Get all unique guild IDs stored across all database tables.
+    
+    Returns:
+        List of unique guild IDs from all tables
+    """
+    def operation():
+        client = get_supabase_client()
+        
+        # Get guild IDs from all tables that store guild data
+        tables_to_check = [
+            'weekly_schedules',
+            'guild_settings', 
+            'admin_notifications',
+            'daily_posts'
+        ]
+        
+        all_guild_ids = set()
+        
+        for table in tables_to_check:
+            try:
+                result = client.table(table).select('guild_id').execute()
+                if result.data:
+                    table_guild_ids = [row['guild_id'] for row in result.data]
+                    all_guild_ids.update(table_guild_ids)
+            except Exception as e:
+                print(f"Warning: Could not fetch guild IDs from {table}: {e}")
+                continue
+        
+        return list(all_guild_ids)
+    
+    return _handle_database_operation(operation, "getting all stored guild IDs", [])
+
+async def get_guilds_with_recent_activity(days_threshold: int = 21) -> List[int]:
+    """
+    Get guild IDs that have had activity within the specified number of days.
+    Activity is defined as having updated weekly schedules or created daily posts.
+    
+    Args:
+        days_threshold: Number of days to look back for activity (default: 21 days = 3 weeks)
+        
+    Returns:
+        List of guild IDs with recent activity
+    """
+    def operation():
+        client = get_supabase_client()
+        
+        # Calculate cutoff date
+        from datetime import datetime, timedelta, timezone
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_threshold)
+        cutoff_iso = cutoff_date.isoformat()
+        
+        active_guild_ids = set()
+        
+        try:
+            # Check weekly_schedules for recent updates
+            weekly_result = client.table('weekly_schedules').select('guild_id').gte('updated_at', cutoff_iso).execute()
+            if weekly_result.data:
+                weekly_guild_ids = [row['guild_id'] for row in weekly_result.data]
+                active_guild_ids.update(weekly_guild_ids)
+                print(f"Found {len(weekly_guild_ids)} guilds with recent weekly schedule updates")
+            
+            # Check daily_posts for recent activity
+            daily_result = client.table('daily_posts').select('guild_id').gte('created_at', cutoff_iso).execute()
+            if daily_result.data:
+                daily_guild_ids = [row['guild_id'] for row in daily_result.data]
+                active_guild_ids.update(daily_guild_ids)
+                print(f"Found {len(daily_guild_ids)} guilds with recent daily posts")
+            
+            # Check guild_settings for recent updates
+            settings_result = client.table('guild_settings').select('guild_id').gte('updated_at', cutoff_iso).execute()
+            if settings_result.data:
+                settings_guild_ids = [row['guild_id'] for row in settings_result.data]
+                active_guild_ids.update(settings_guild_ids)
+                print(f"Found {len(settings_guild_ids)} guilds with recent settings updates")
+            
+        except Exception as e:
+            print(f"Error checking recent activity: {e}")
+            # If we can't determine recent activity, return empty list to be safe
+            return []
+        
+        return list(active_guild_ids)
+    
+    return _handle_database_operation(operation, f"getting guilds with activity in last {days_threshold} days", [])
+
+async def cleanup_orphaned_guild_data(orphaned_guild_ids: List[int]) -> dict:
+    """
+    Clean up ALL database records for guilds that no longer exist.
+    This function ensures complete deletion of all guild-related data from ALL tables.
+    
+    Args:
+        orphaned_guild_ids: List of guild IDs to completely remove from database
+        
+    Returns:
+        Dictionary with cleanup statistics and verification results
+    """
+    if not orphaned_guild_ids:
+        return {"cleaned_guilds": 0, "errors": [], "tables_cleaned": {}}
+    
+    cleanup_stats = {
+        "cleaned_guilds": 0,
+        "errors": [],
+        "tables_cleaned": {},
+        "verification": {}
+    }
+    
+    try:
+        client = get_supabase_client()
+        
+        # ALL tables that contain guild data - comprehensive cleanup
+        # Ordered by dependency (child tables first, parent tables last)
+        cleanup_tables = [
+            ('rsvp_responses', 'guild_id', 'User RSVP responses'),
+            ('reminder_sends', 'guild_id', 'Reminder tracking records'), 
+            ('admin_notifications', 'guild_id', 'Admin notification records'),
+            ('daily_posts', 'guild_id', 'Daily event posts'),
+            ('guild_settings', 'guild_id', 'Guild configuration settings'),
+            ('weekly_schedules', 'guild_id', 'Weekly schedule data')
+        ]
+        
+        print(f"Starting complete cleanup of {len(orphaned_guild_ids)} orphaned guilds...")
+        print(f"Guild IDs to clean: {orphaned_guild_ids}")
+        
+        # Step 1: Delete all records from all tables
+        for table_name, guild_id_column, description in cleanup_tables:
+            try:
+                print(f"Cleaning {table_name} ({description})...")
+                
+                # Delete records for orphaned guilds
+                result = client.table(table_name).delete().in_(guild_id_column, orphaned_guild_ids).execute()
+                
+                deleted_count = len(result.data) if result.data else 0
+                cleanup_stats["tables_cleaned"][table_name] = deleted_count
+                
+                if deleted_count > 0:
+                    print(f"  ✅ Deleted {deleted_count} records from {table_name}")
+                else:
+                    print(f"  ℹ️ No records found in {table_name}")
+                    
+            except Exception as e:
+                error_msg = f"Error cleaning {table_name}: {e}"
+                cleanup_stats["errors"].append(error_msg)
+                print(f"  ❌ {error_msg}")
+                continue
+        
+        # Step 2: Verify complete deletion
+        print("\nVerifying complete deletion...")
+        for table_name, guild_id_column, description in cleanup_tables:
+            try:
+                # Check if any records still exist for these guilds
+                verification_result = client.table(table_name).select(guild_id_column).in_(guild_id_column, orphaned_guild_ids).execute()
+                remaining_count = len(verification_result.data) if verification_result.data else 0
+                
+                cleanup_stats["verification"][table_name] = {
+                    "remaining_records": remaining_count,
+                    "status": "clean" if remaining_count == 0 else "incomplete"
+                }
+                
+                if remaining_count == 0:
+                    print(f"  ✅ {table_name}: Complete deletion verified")
+                else:
+                    print(f"  ⚠️ {table_name}: {remaining_count} records still remain")
+                    
+            except Exception as e:
+                cleanup_stats["verification"][table_name] = {
+                    "remaining_records": "unknown",
+                    "status": "error",
+                    "error": str(e)
+                }
+                print(f"  ❌ {table_name}: Verification failed - {e}")
+        
+        cleanup_stats["cleaned_guilds"] = len(orphaned_guild_ids)
+        
+        # Summary
+        total_deleted = sum(cleanup_stats["tables_cleaned"].values())
+        print(f"\nCleanup Summary:")
+        print(f"  - Guilds processed: {len(orphaned_guild_ids)}")
+        print(f"  - Total records deleted: {total_deleted}")
+        print(f"  - Tables cleaned: {len([t for t in cleanup_stats['tables_cleaned'].values() if t > 0])}")
+        print(f"  - Errors encountered: {len(cleanup_stats['errors'])}")
+        
+    except Exception as e:
+        error_msg = f"Fatal error during guild cleanup: {e}"
+        cleanup_stats["errors"].append(error_msg)
+        print(f"❌ {error_msg}")
+    
+    return cleanup_stats
+
+async def perform_guild_cleanup_on_startup(current_guild_ids: List[int], days_threshold: int = None) -> dict:
+    """
+    Perform comprehensive guild cleanup on bot startup.
+    Removes database records for guilds that the bot is no longer a member of,
+    but preserves guilds with recent activity (within specified days).
+    
+    Args:
+        current_guild_ids: List of guild IDs the bot is currently a member of
+        days_threshold: Number of days to preserve guilds with recent activity (default: 21 days = 3 weeks)
+        
+    Returns:
+        Dictionary with cleanup results and statistics
+    """
+    # Set default threshold if not provided
+    if days_threshold is None:
+        days_threshold = int(os.getenv('GUILD_CLEANUP_DAYS_THRESHOLD', '21'))
+    
+    print(f"Starting guild cleanup on bot startup (preserving guilds with activity in last {days_threshold} days)...")
+    
+    try:
+        # Get all guild IDs stored in database
+        stored_guild_ids = await get_all_stored_guild_ids()
+        
+        if not stored_guild_ids:
+            print("No guild data found in database")
+            return {"status": "no_data", "cleaned_guilds": 0}
+        
+        # Get guilds with recent activity (within the threshold)
+        recent_activity_guilds = await get_guilds_with_recent_activity(days_threshold)
+        print(f"Found {len(recent_activity_guilds)} guilds with recent activity (last {days_threshold} days)")
+        
+        # Convert to sets for efficient comparison
+        current_guild_set = set(current_guild_ids)
+        stored_guild_set = set(stored_guild_ids)
+        recent_activity_set = set(recent_activity_guilds)
+        
+        # Find orphaned guilds (stored but not current)
+        orphaned_guild_ids = list(stored_guild_set - current_guild_set)
+        
+        if not orphaned_guild_ids:
+            print("No orphaned guild data found - database is clean")
+            return {"status": "clean", "cleaned_guilds": 0}
+        
+        # Filter out guilds with recent activity from cleanup
+        guilds_to_clean = [guild_id for guild_id in orphaned_guild_ids if guild_id not in recent_activity_set]
+        preserved_guilds = [guild_id for guild_id in orphaned_guild_ids if guild_id in recent_activity_set]
+        
+        print(f"Found {len(orphaned_guild_ids)} orphaned guilds total:")
+        print(f"  - {len(preserved_guilds)} guilds preserved (recent activity): {preserved_guilds}")
+        print(f"  - {len(guilds_to_clean)} guilds to clean (no recent activity): {guilds_to_clean}")
+        
+        if not guilds_to_clean:
+            print("No guilds to clean - all orphaned guilds have recent activity")
+            return {
+                "status": "preserved", 
+                "cleaned_guilds": 0,
+                "preserved_guilds": preserved_guilds,
+                "preserved_count": len(preserved_guilds)
+            }
+        
+        # Perform cleanup only on guilds without recent activity
+        cleanup_results = await cleanup_orphaned_guild_data(guilds_to_clean)
+        
+        # Log results
+        if cleanup_results["cleaned_guilds"] > 0:
+            print(f"Successfully cleaned data for {cleanup_results['cleaned_guilds']} inactive orphaned guilds")
+            
+            # Log table-specific cleanup results
+            for table, count in cleanup_results["tables_cleaned"].items():
+                if count > 0:
+                    print(f"  - {table}: {count} records removed")
+        
+        if cleanup_results["errors"]:
+            print(f"Encountered {len(cleanup_results['errors'])} errors during cleanup:")
+            for error in cleanup_results["errors"]:
+                print(f"  - {error}")
+        
+        return {
+            "status": "completed",
+            "cleaned_guilds": cleanup_results["cleaned_guilds"],
+            "orphaned_guilds": guilds_to_clean,
+            "preserved_guilds": preserved_guilds,
+            "preserved_count": len(preserved_guilds),
+            "errors": cleanup_results["errors"],
+            "tables_cleaned": cleanup_results["tables_cleaned"]
+        }
+        
+    except Exception as e:
+        error_msg = f"Fatal error during guild cleanup: {e}"
+        print(error_msg)
+        return {
+            "status": "error",
+            "error": error_msg,
+            "cleaned_guilds": 0
+        }

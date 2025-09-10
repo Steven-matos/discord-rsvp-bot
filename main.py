@@ -123,6 +123,36 @@ async def on_connect():
 async def on_resumed():
     logger.info("Bot resumed connection to Discord")
 
+@bot.event
+async def on_guild_remove(guild):
+    """
+    Handle bot removal from a guild - clean up database records immediately.
+    
+    Args:
+        guild: The guild object that the bot was removed from
+    """
+    try:
+        logger.info(f"Bot removed from guild: {guild.name} (ID: {guild.id})")
+        
+        # Clean up database records for this guild
+        cleanup_results = await database.cleanup_orphaned_guild_data([guild.id])
+        
+        if cleanup_results["cleaned_guilds"] > 0:
+            logger.info(f"Cleaned database records for removed guild {guild.id}")
+            
+            # Log table-specific cleanup results
+            for table, count in cleanup_results["tables_cleaned"].items():
+                if count > 0:
+                    logger.info(f"  - {table}: {count} records removed")
+        else:
+            logger.info(f"No database records found for removed guild {guild.id}")
+            
+        if cleanup_results["errors"]:
+            logger.warning(f"Errors during guild removal cleanup: {cleanup_results['errors']}")
+            
+    except Exception as e:
+        logger.error(f"Failed to clean up database records for removed guild {guild.id}: {e}")
+
 # Add a command to check bot status
 @bot.slash_command(
     name="bot_status",
@@ -176,6 +206,131 @@ async def bot_status(inter: disnake.ApplicationCommandInteraction):
         await inter.response.send_message(embed=embed, ephemeral=True)
     else:
         await inter.response.send_message("❌ Bot status not available", ephemeral=True)
+
+@bot.slash_command(
+    name="cleanup_guilds",
+    description="Manually trigger guild cleanup to remove orphaned database records (Admin only)"
+)
+async def cleanup_guilds(inter: disnake.ApplicationCommandInteraction):
+    """Manually trigger guild cleanup to remove orphaned database records"""
+    # Check if user has administrator permissions
+    if not inter.author.guild_permissions.administrator:
+        await inter.response.send_message("❌ This command requires administrator permissions", ephemeral=True)
+        return
+    
+    try:
+        await inter.response.defer(ephemeral=True)
+        
+        # Get current guild IDs
+        current_guild_ids = [guild.id for guild in bot.guilds]
+        
+        # Perform cleanup
+        cleanup_results = await database.perform_guild_cleanup_on_startup(current_guild_ids)
+        
+        # Create response embed
+        embed = disnake.Embed(
+            title="🧹 Guild Cleanup Results",
+            color=disnake.Color.green() if cleanup_results["status"] == "completed" else disnake.Color.blue()
+        )
+        
+        if cleanup_results["status"] == "completed":
+            embed.add_field(
+                name="Status", 
+                value=f"✅ Cleanup completed successfully", 
+                inline=False
+            )
+            embed.add_field(
+                name="Guilds Cleaned", 
+                value=str(cleanup_results["cleaned_guilds"]), 
+                inline=True
+            )
+            
+            # Add preserved guilds info
+            if cleanup_results.get("preserved_count", 0) > 0:
+                embed.add_field(
+                    name="Guilds Preserved", 
+                    value=f"{cleanup_results['preserved_count']} (recent activity)", 
+                    inline=True
+                )
+            
+            # Add table-specific results
+            if cleanup_results["tables_cleaned"]:
+                table_info = []
+                for table, count in cleanup_results["tables_cleaned"].items():
+                    if count > 0:
+                        table_info.append(f"• {table}: {count} records")
+                
+                if table_info:
+                    embed.add_field(
+                        name="Records Removed", 
+                        value="\n".join(table_info), 
+                        inline=False
+                    )
+            
+            # Add verification results
+            if cleanup_results.get("verification"):
+                verification_info = []
+                for table, verification in cleanup_results["verification"].items():
+                    if verification["status"] == "clean":
+                        verification_info.append(f"✅ {table}: Complete")
+                    elif verification["status"] == "incomplete":
+                        verification_info.append(f"⚠️ {table}: {verification['remaining_records']} remaining")
+                    elif verification["status"] == "error":
+                        verification_info.append(f"❌ {table}: Verification failed")
+                
+                if verification_info:
+                    embed.add_field(
+                        name="Deletion Verification", 
+                        value="\n".join(verification_info), 
+                        inline=False
+                    )
+            
+            if cleanup_results["errors"]:
+                embed.add_field(
+                    name="⚠️ Warnings", 
+                    value=f"{len(cleanup_results['errors'])} errors occurred during cleanup", 
+                    inline=False
+                )
+                
+        elif cleanup_results["status"] == "preserved":
+            embed.add_field(
+                name="Status", 
+                value=f"✅ No cleanup needed - all {cleanup_results['preserved_count']} orphaned guilds have recent activity", 
+                inline=False
+            )
+            embed.add_field(
+                name="Note", 
+                value="Guilds with activity in the last 3 weeks are preserved", 
+                inline=False
+            )
+        elif cleanup_results["status"] == "clean":
+            embed.add_field(
+                name="Status", 
+                value="✅ Database is already clean - no orphaned guild data found", 
+                inline=False
+            )
+        elif cleanup_results["status"] == "no_data":
+            embed.add_field(
+                name="Status", 
+                value="ℹ️ No guild data found in database", 
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="Status", 
+                value=f"❌ Cleanup failed: {cleanup_results.get('error', 'Unknown error')}", 
+                inline=False
+            )
+            embed.color = disnake.Color.red()
+        
+        await inter.edit_original_response(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error in manual guild cleanup command: {e}")
+        await inter.edit_original_response(
+            content=f"❌ An error occurred during cleanup: {e}",
+            embed=None
+        )
 
 
 async def load_persistent_views():
@@ -259,6 +414,28 @@ async def on_ready():
     
     # Initialize database connection pool using helper method
     await _handle_database_operation_async("Initialize database connection pool", database.init_db_pool)
+    
+    # Perform guild cleanup to remove orphaned data
+    try:
+        current_guild_ids = [guild.id for guild in bot.guilds]
+        cleanup_results = await database.perform_guild_cleanup_on_startup(current_guild_ids)
+        
+        if cleanup_results["status"] == "completed":
+            logger.info(f"Guild cleanup completed: {cleanup_results['cleaned_guilds']} inactive orphaned guilds cleaned")
+            if cleanup_results.get("preserved_count", 0) > 0:
+                logger.info(f"Preserved {cleanup_results['preserved_count']} guilds with recent activity")
+            if cleanup_results["errors"]:
+                logger.warning(f"Guild cleanup had {len(cleanup_results['errors'])} errors")
+        elif cleanup_results["status"] == "preserved":
+            logger.info(f"No guilds cleaned - all {cleanup_results['preserved_count']} orphaned guilds have recent activity")
+        elif cleanup_results["status"] == "clean":
+            logger.info("Database is clean - no orphaned guild data found")
+        elif cleanup_results["status"] == "no_data":
+            logger.info("No guild data found in database")
+        else:
+            logger.error(f"Guild cleanup failed: {cleanup_results.get('error', 'Unknown error')}")
+    except Exception as e:
+        logger.error(f"Failed to perform guild cleanup: {e}")
     
     # Initialize core systems
     try:
