@@ -1159,8 +1159,8 @@ class ScheduleCog(commands.Cog):
         try:
             await inter.response.send_message("🔄 Force syncing commands...", ephemeral=True)
             
-            # Force a re-registration of commands
-            await self.bot.sync_commands()
+            # Force a re-registration of commands using the correct disnake method
+            await self.bot.tree.sync()
             
             await inter.edit_original_message(
                 "✅ **Commands Force Synced!**\n"

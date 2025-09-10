@@ -142,7 +142,7 @@ class PerformanceCog(commands.Cog):
             )
             
             # Task performance
-            task_stats = task_manager.get_performance_stats()
+            task_stats = await task_manager.get_performance_stats()
             embed.add_field(
                 name="⚙️ Task Performance",
                 value=f"**Success Rate:** {task_stats.get('success_rate', 0):.1f}%\n"
@@ -152,7 +152,7 @@ class PerformanceCog(commands.Cog):
             )
             
             # Security metrics
-            security_stats = security_manager.get_security_stats()
+            security_stats = await security_manager.get_security_stats()
             embed.add_field(
                 name="🔒 Security Status",
                 value=f"**Total Events:** {security_stats.get('total_security_events', 0)}\n"
@@ -359,8 +359,8 @@ class PerformanceCog(commands.Cog):
                     'error_monitor': await error_monitor.get_error_stats(),
                     'backup_manager': await backup_manager.get_backup_stats(),
                     'database_optimizer': db_optimizer.get_performance_stats(),
-                    'task_manager': task_manager.get_performance_stats(),
-                    'security_manager': security_manager.get_security_stats()
+                    'task_manager': await task_manager.get_performance_stats(),
+                    'security_manager': await security_manager.get_security_stats()
                 }
             }
         except Exception as e:
@@ -372,7 +372,7 @@ class PerformanceCog(commands.Cog):
         try:
             cache_stats = cache_manager.get_stats()
             db_stats = db_optimizer.get_performance_stats()
-            task_stats = task_manager.get_performance_stats()
+            task_stats = await task_manager.get_performance_stats()
             error_stats = await error_monitor.get_error_stats()
             
             return {
@@ -404,7 +404,7 @@ class PerformanceCog(commands.Cog):
     async def _get_security_metrics(self) -> Dict[str, Any]:
         """Get security metrics summary"""
         try:
-            security_stats = security_manager.get_security_stats()
+            security_stats = await security_manager.get_security_stats()
             recent_events = security_manager.get_recent_security_events(10)
             
             return {
