@@ -138,7 +138,7 @@ class AdvancedRateLimiter:
                 backoff_strategy=BackoffStrategy.ADAPTIVE
             )
         }
-        self._cleanup_interval = timedelta(minutes=5)
+        self._cleanup_interval = timedelta(minutes=3)  # More frequent cleanup for memory efficiency
         self._last_cleanup = datetime.now(timezone.utc)
         self._lock = asyncio.Lock()
         self._stats = {
@@ -147,6 +147,10 @@ class AdvancedRateLimiter:
             'backoff_activations': 0,
             'violations': 0
         }
+        
+        # Memory optimization
+        self._max_entries = 1000  # Limit number of rate limit entries
+        self._cleanup_threshold = 0.8  # Cleanup when 80% full
     
     def _generate_key(self, rate_limit_type: RateLimitType, user_id: Optional[int] = None, 
                      guild_id: Optional[int] = None) -> str:
@@ -312,28 +316,44 @@ class AdvancedRateLimiter:
     
     async def cleanup_old_entries(self) -> int:
         """
-        Clean up old rate limit entries to prevent memory leaks.
+        Clean up old rate limit entries to prevent memory leaks with aggressive cleanup.
         
         Returns:
             Number of entries cleaned up
         """
         async with self._lock:
             now = datetime.now(timezone.utc)
-            cleanup_threshold = now - timedelta(hours=24)  # Remove entries older than 24 hours
+            cleanup_threshold = now - timedelta(hours=6)  # More aggressive: 6 hours instead of 24
             
             keys_to_remove = []
+            
+            # Check if we need aggressive cleanup
+            if len(self._entries) > self._max_entries * self._cleanup_threshold:
+                # Sort by last activity and remove oldest entries
+                sorted_entries = sorted(
+                    self._entries.items(),
+                    key=lambda x: x[1].last_violation or x[1].requests[-1] if x[1].requests else datetime.min.replace(tzinfo=timezone.utc)
+                )
+                
+                # Remove oldest 20% of entries
+                remove_count = int(len(self._entries) * 0.2)
+                for i in range(remove_count):
+                    keys_to_remove.append(sorted_entries[i][0])
+            
+            # Regular cleanup of inactive entries
             for key, entry in self._entries.items():
-                # Remove entries with no recent activity
-                if (not entry.requests and 
-                    (entry.last_violation is None or entry.last_violation < cleanup_threshold) and
-                    entry.success_count == 0 and entry.failure_count == 0):
-                    keys_to_remove.append(key)
+                if key not in keys_to_remove:  # Don't double-remove
+                    # Remove entries with no recent activity
+                    if (not entry.requests and 
+                        (entry.last_violation is None or entry.last_violation < cleanup_threshold) and
+                        entry.success_count == 0 and entry.failure_count == 0):
+                        keys_to_remove.append(key)
             
             for key in keys_to_remove:
                 del self._entries[key]
             
             if keys_to_remove:
-                logger.info(f"Cleaned up {len(keys_to_remove)} old rate limit entries")
+                logger.info(f"Cleaned up {len(keys_to_remove)} old rate limit entries (Total: {len(self._entries)})")
             
             return len(keys_to_remove)
     

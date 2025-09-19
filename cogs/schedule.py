@@ -7,6 +7,7 @@ import calendar
 import pytz
 import functools
 import os
+from utils.timezone_utils import timezone_manager
 import traceback
 
 # Specific user IDs that have access to all admin commands
@@ -197,10 +198,9 @@ class RSVPView(disnake.ui.View):
             
             # Check if event time is set and if current time has passed it
             if guild_settings and 'event_time' in guild_settings:
-                # Eastern timezone for consistency with event scheduling
-                eastern_tz = pytz.timezone('America/New_York')
-                now_eastern = datetime.now(eastern_tz)
-                today_date = now_eastern.date()
+                # Use configured timezone for consistency with event scheduling
+                now_local = timezone_manager.now()
+                today_date = now_local.date()
                 
                 # Parse the event time from guild settings (format: "HH:MM:SS")
                 event_time_str = guild_settings['event_time']
@@ -208,16 +208,16 @@ class RSVPView(disnake.ui.View):
                     # Parse the time and combine with today's date
                     event_time = datetime.strptime(event_time_str, '%H:%M:%S').time()
                     event_datetime = datetime.combine(today_date, event_time)
-                    event_datetime_eastern = eastern_tz.localize(event_datetime)
+                    event_datetime_local = timezone_manager.localize(event_datetime)
                     
                     # Check if the event time has passed
-                    if now_eastern >= event_datetime_eastern:
-                        # Convert to 12-hour format for user-friendly display
-                        event_time_display = event_time.strftime('%I:%M %p')
+                    if now_local >= event_datetime_local:
+                        # Format time display using timezone manager
+                        event_time_display, _ = timezone_manager.format_time_display(event_datetime_local, include_utc=False)
                         await inter.followup.send(
                             f"⏰ **RSVP Period Closed**\n"
                             f"Sorry, you cannot RSVP after the event has started.\n"
-                            f"Today's event started at **{event_time_display} Eastern Time**.\n"
+                            f"Today's event started at **{event_time_display}**.\n"
                             f"Please join us for the next event!",
                             ephemeral=True
                         )
@@ -231,6 +231,14 @@ class RSVPView(disnake.ui.View):
             success = await database.save_rsvp_response(self.post_id, user_id, guild_id, response_type)
             
             if success:
+                # Additional cache invalidation for immediate effect
+                try:
+                    from core.cache_manager import invalidate_rsvp_cache_for_guild
+                    await invalidate_rsvp_cache_for_guild(guild_id)
+                except Exception as cache_error:
+                    # Log but don't fail the RSVP
+                    print(f"Warning: Additional cache invalidation failed: {cache_error}")
+                
                 response_emoji = {"yes": "✅", "no": "❌", "maybe": "❓", "mobile": "📱"}[response_type]
                 await inter.followup.send(
                     f"{response_emoji} **RSVP Updated!**\n"
@@ -270,8 +278,8 @@ class ScheduleCog(commands.Cog):
         # Days of the week in order
         self.days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
         
-        # Eastern timezone for event times
-        self.eastern_tz = pytz.timezone('America/New_York')
+        # Use configured timezone for event times
+        self.timezone_manager = timezone_manager
         
         # Track last posting time per guild to prevent duplicates
         self.last_posted_times = {}  # guild_id -> datetime
@@ -410,11 +418,11 @@ class ScheduleCog(commands.Cog):
             return True
         return False
     
-    def _format_time_display(self, event_datetime_eastern: datetime, event_datetime_utc: datetime) -> tuple:
+    def _format_time_display(self, event_datetime_local: datetime, event_datetime_utc: datetime) -> tuple:
         """Helper method to format time displays consistently"""
-        eastern_time_display = event_datetime_eastern.strftime("%I:%M %p ET")
+        local_time_display, _ = self.timezone_manager.format_time_display(event_datetime_local, include_utc=False)
         utc_time_display = event_datetime_utc.strftime("%I:%M %p UTC")
-        return eastern_time_display, utc_time_display
+        return local_time_display, utc_time_display
     
     async def _check_bot_permissions(self, channel: disnake.TextChannel, guild_id: int, log_prefix: str = "SYSTEM") -> bool:
         """
@@ -440,9 +448,9 @@ class ScheduleCog(commands.Cog):
     async def daily_posting_task(self):
         """Check if it's time to post daily events for each guild based on their posting time"""
         try:
-            now_eastern = datetime.now(self.eastern_tz)
+            now_local = self.timezone_manager.now()
             
-            self._log_with_prefix("TASK", f"Daily posting task running at {now_eastern.strftime('%H:%M:%S')} Eastern (seconds: {now_eastern.second})")
+            self._log_with_prefix("TASK", f"Daily posting task running at {now_local.strftime('%H:%M:%S')} {self.timezone_manager.display_name} (seconds: {now_local.second})")
             
             # Always call the posting check - let the check function handle duplicate prevention
             self._log_with_prefix("TASK", "Calling check_and_post_daily_events()")
@@ -461,10 +469,10 @@ class ScheduleCog(commands.Cog):
     @tasks.loop(minutes=5)  # Check every 5 minutes instead of every minute
     async def reminder_check_task(self):
         """Check if it's time to send reminders for events"""
-        now_eastern = datetime.now(self.eastern_tz)
+        now_local = self.timezone_manager.now()
         
         # Now that we run every 5 minutes, always check
-        print(f"[REMINDER] Checking reminders at {now_eastern.strftime('%H:%M:%S')} Eastern")
+        print(f"[REMINDER] Checking reminders at {now_local.strftime('%H:%M:%S')} {self.timezone_manager.display_name}")
         await self.check_and_send_reminders()
     
     @reminder_check_task.before_loop
@@ -475,8 +483,8 @@ class ScheduleCog(commands.Cog):
     async def cleanup_old_posts_task(self):
         """Clean up old daily posts to keep channels clean"""
         try:
-            # Get yesterday's date as cutoff using Eastern time (delete posts older than yesterday)
-            yesterday = datetime.now(self.eastern_tz).date() - timedelta(days=1)
+            # Get yesterday's date as cutoff using configured timezone (delete posts older than yesterday)
+            yesterday = self.timezone_manager.today() - timedelta(days=1)
             
             # Get all old posts
             old_posts = await database.get_old_daily_posts(yesterday)
@@ -574,10 +582,10 @@ class ScheduleCog(commands.Cog):
     
     async def check_and_post_daily_events(self):
         """Check each guild's posting time and post events for guilds whose time matches now"""
-        now_eastern = datetime.now(self.eastern_tz)
-        current_time = now_eastern.time().replace(second=0, microsecond=0)
+        now_local = self.timezone_manager.now()
+        current_time = now_local.time().replace(second=0, microsecond=0)
         
-        self._log_with_prefix("AUTO-POST", f"Checking at {now_eastern.strftime('%H:%M:%S')} Eastern")
+        self._log_with_prefix("AUTO-POST", f"Checking at {now_local.strftime('%H:%M:%S')} {self.timezone_manager.display_name}")
         
         guilds_with_schedules = await database.get_all_guilds_with_schedules()
         self._log_with_prefix("AUTO-POST", f"Found {len(guilds_with_schedules)} guilds with schedules")
@@ -610,12 +618,12 @@ class ScheduleCog(commands.Cog):
                     self._log_with_prefix("AUTO-POST", f"Time match for guild {guild_id}! Attempting to post...")
                     
                     # Check if we already posted in this minute to prevent duplicates
-                    current_minute_key = now_eastern.replace(second=0, microsecond=0)
+                    current_minute_key = now_local.replace(second=0, microsecond=0)
                     if self._check_duplicate_prevention(self.last_posted_times, guild_id, current_minute_key, "AUTO-POST", f"daily post for guild {guild_id}"):
                         continue
                     
                     # Check if we already posted today to prevent duplicates
-                    today = now_eastern.date()
+                    today = now_local.date()
                     existing_post = await database.get_daily_post(guild_id, today)
                     
                     if existing_post:
@@ -645,9 +653,9 @@ class ScheduleCog(commands.Cog):
         """Post today's event to the specified channel"""
         guild_id = guild.id
         
-        # Get today's day of week (using Eastern time to determine the current day)
-        today_eastern = datetime.now(self.eastern_tz)
-        day_name = calendar.day_name[today_eastern.weekday()].lower()
+        # Get today's day of week (using configured timezone to determine the current day)
+        today_local = self.timezone_manager.now()
+        day_name = self.timezone_manager.get_weekday_name(today_local)
         
         # Check if current week's schedule is set up
         is_current_week_setup = await self.check_current_week_setup(guild_id)
@@ -673,8 +681,8 @@ class ScheduleCog(commands.Cog):
         event_time_str = guild_settings.get('event_time', '20:00:00') if guild_settings else '20:00:00'
         event_time = datetime.strptime(event_time_str, '%H:%M:%S').time()
         
-        # Create event datetime in Eastern time
-        event_datetime_eastern = today_eastern.replace(
+        # Create event datetime in configured timezone
+        event_datetime_local = today_local.replace(
             hour=event_time.hour,
             minute=event_time.minute,
             second=0,
@@ -682,17 +690,17 @@ class ScheduleCog(commands.Cog):
         )
         
         # Convert to UTC for display
-        event_datetime_utc = event_datetime_eastern.astimezone(timezone.utc)
+        event_datetime_utc = self.timezone_manager.to_utc(event_datetime_local)
         
         # Format times for display
-        eastern_time_display, utc_time_display = self._format_time_display(event_datetime_eastern, event_datetime_utc)
+        local_time_display, utc_time_display = self._format_time_display(event_datetime_local, event_datetime_utc)
         
         # Create embed for the event
         embed = disnake.Embed(
             title=f"🎯 Today's Event - {day_name.capitalize()}",
             description=f"**{event_data['event_name']}**",
             color=disnake.Color.blue(),
-            timestamp=today_eastern.astimezone(timezone.utc)
+            timestamp=event_datetime_utc
         )
         
         embed.add_field(
@@ -709,13 +717,13 @@ class ScheduleCog(commands.Cog):
         
         embed.add_field(
             name="⏰ Time",
-            value=f"**{eastern_time_display}** / **{utc_time_display}**",
+            value=f"**{local_time_display}** / **{utc_time_display}**",
             inline=False
         )
         
         embed.add_field(
             name="📅 Date",
-            value=today_eastern.strftime("%A, %B %d, %Y"),
+            value=today_local.strftime("%A, %B %d, %Y"),
             inline=False
         )
         
@@ -732,12 +740,12 @@ class ScheduleCog(commands.Cog):
             # Send the message with @everyone ping
             message = await channel.send("@everyone", embed=embed, view=view)
             
-            # Save to database (use Eastern date for consistency)
+            # Save to database (use configured timezone date for consistency)
             post_id = await database.save_daily_post(
                 guild_id, 
                 channel.id, 
                 message.id, 
-                today_eastern.date(), 
+                today_local.date(), 
                 day_name, 
                 event_data
             )
@@ -1774,15 +1782,21 @@ class ScheduleCog(commands.Cog):
     
     @commands.slash_command(
         name="view_rsvps",
-        description="View RSVP responses for today's event"
+        description="View RSVP responses for today's event (live data, no caching)"
     )
     async def view_rsvps(self, inter: disnake.ApplicationCommandInteraction):
-        """View RSVP responses for today's event"""
+        """
+        View RSVP responses for today's event.
+        
+        This command always fetches live data directly from the database
+        without using any caching mechanisms to ensure real-time accuracy.
+        """
         guild_id = inter.guild.id
-        # Use Eastern time to determine what day it is
-        today = datetime.now(self.eastern_tz).date()
+        # Use configured timezone to determine what day it is
+        today = self.timezone_manager.today()
         
         # Get all posts for today (handles both automatic and manual posts)
+        # NOTE: Direct database call - no caching to ensure live data
         posts = await database.get_all_daily_posts_for_date(guild_id, today)
         if not posts:
             await inter.response.send_message(
@@ -1793,7 +1807,9 @@ class ScheduleCog(commands.Cog):
             return
         
         # Get aggregated RSVP responses from all posts for today
-        rsvps = await database.get_aggregated_rsvp_responses_for_date(guild_id, today)
+        # NOTE: Using comprehensive method to ensure we get all RSVPs
+        from utils.rsvp_migration import get_todays_rsvps_comprehensive
+        rsvps = await get_todays_rsvps_comprehensive(guild_id)
         
         # Use the most recent post for event details (they should all be the same event)
         post_data = posts[-1]  # Most recent post
@@ -1917,8 +1933,8 @@ class ScheduleCog(commands.Cog):
     async def view_yesterday_rsvps(self, inter: disnake.ApplicationCommandInteraction):
         """View RSVP responses for yesterday's event"""
         guild_id = inter.guild.id
-        # Use Eastern time to determine what day it is
-        yesterday = (datetime.now(self.eastern_tz) - timedelta(days=1)).date()
+        # Use configured timezone to determine what day it is
+        yesterday = self.timezone_manager.today() - timedelta(days=1)
         
         # Get all posts for yesterday (handles both automatic and manual posts)
         posts = await database.get_all_daily_posts_for_date(guild_id, yesterday)

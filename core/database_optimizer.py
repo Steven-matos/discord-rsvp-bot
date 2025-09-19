@@ -88,16 +88,16 @@ class DatabaseOptimizer:
     Provides intelligent query optimization and connection management.
     """
     
-    def __init__(self, max_connections: int = 10, query_cache_size: int = 1000):
+    def __init__(self, max_connections: int = 3, query_cache_size: int = 200):
         """
-        Initialize the database optimizer.
+        Initialize the database optimizer with memory-optimized settings.
         
         Args:
-            max_connections: Maximum number of concurrent connections
-            query_cache_size: Maximum number of cached query results
+            max_connections: Maximum number of concurrent connections (reduced for 1.25GB memory)
+            query_cache_size: Maximum number of cached query results (reduced for memory constraints)
         """
-        self._max_connections = max_connections
-        self._query_cache_size = query_cache_size
+        self._max_connections = max_connections  # Reduced from 10 to 3 for memory constraints
+        self._query_cache_size = query_cache_size  # Reduced from 1000 to 200
         
         # Connection management
         self._connections: Dict[str, Client] = {}
@@ -176,10 +176,10 @@ class DatabaseOptimizer:
         logger.info("Database optimizer stopped")
     
     async def _initialize_connection_pool(self) -> None:
-        """Initialize the connection pool with initial connections"""
+        """Initialize the connection pool with minimal connections for memory efficiency"""
         async with self._connection_lock:
-            # Create initial connections (start with 2)
-            initial_connections = min(2, self._max_connections)
+            # Create only 1 initial connection to save memory
+            initial_connections = min(1, self._max_connections)
             for i in range(initial_connections):
                 await self._create_connection()
     
@@ -459,36 +459,62 @@ class DatabaseOptimizer:
                 logger.error(f"Error in database optimizer cleanup: {e}")
     
     async def _cleanup_connections(self) -> None:
-        """Clean up idle connections"""
+        """Clean up idle connections with aggressive cleanup for memory efficiency"""
         async with self._connection_lock:
             now = datetime.now(timezone.utc)
             connections_to_close = []
             
             for connection_id, info in self._connection_info.items():
-                # Close connections that have been idle for more than 30 minutes
+                # More aggressive cleanup: close connections idle for more than 10 minutes
                 if (info.state == ConnectionState.IDLE and 
-                    now - info.last_used > timedelta(minutes=30)):
+                    now - info.last_used > timedelta(minutes=10)):
                     connections_to_close.append(connection_id)
+            
+            # Keep only 1 connection if we have more than 2
+            if len(self._connections) > 2:
+                # Close oldest idle connections first
+                idle_connections = [
+                    (conn_id, info) for conn_id, info in self._connection_info.items()
+                    if info.state == ConnectionState.IDLE
+                ]
+                idle_connections.sort(key=lambda x: x[1].last_used)
+                
+                # Close excess connections
+                excess_count = len(self._connections) - 2
+                for i in range(min(excess_count, len(idle_connections))):
+                    connections_to_close.append(idle_connections[i][0])
             
             for connection_id in connections_to_close:
                 await self._close_connection(connection_id)
                 logger.info(f"Closed idle connection: {connection_id}")
     
     async def _cleanup_cache(self) -> None:
-        """Clean up expired cache entries"""
+        """Clean up expired cache entries with aggressive cleanup for memory efficiency"""
         async with self._query_lock:
             now = datetime.now(timezone.utc)
             expired_keys = []
             
+            # More aggressive cache cleanup: remove entries older than 30 minutes
             for key, (_, cached_at) in self._query_cache.items():
-                if now - cached_at > timedelta(hours=1):  # Remove entries older than 1 hour
+                if now - cached_at > timedelta(minutes=30):  # Reduced from 1 hour to 30 minutes
                     expired_keys.append(key)
+            
+            # If cache is still too large, remove oldest entries
+            if len(self._query_cache) > self._query_cache_size * 0.8:  # 80% of max size
+                # Sort by cache time and remove oldest 20%
+                sorted_entries = sorted(
+                    self._query_cache.items(),
+                    key=lambda x: x[1][1]  # Sort by cached_at timestamp
+                )
+                remove_count = len(self._query_cache) // 5  # Remove 20%
+                for i in range(remove_count):
+                    expired_keys.append(sorted_entries[i][0])
             
             for key in expired_keys:
                 del self._query_cache[key]
             
             if expired_keys:
-                logger.info(f"Cleaned up {len(expired_keys)} expired cache entries")
+                logger.info(f"Cleaned up {len(expired_keys)} expired cache entries (Cache size: {len(self._query_cache)})")
     
     async def _monitoring_loop(self) -> None:
         """Background task to monitor database performance"""

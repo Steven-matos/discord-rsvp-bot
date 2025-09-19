@@ -58,27 +58,29 @@ class CacheManager:
     Implements LRU-like behavior with strategy-based optimization.
     """
     
-    def __init__(self, max_size: int = 1000, cleanup_interval_minutes: int = 30):
+    def __init__(self, max_size: int = 500, cleanup_interval_minutes: int = 15):
         """
-        Initialize cache manager with configuration.
+        Initialize cache manager with memory-optimized configuration.
         
         Args:
-            max_size: Maximum number of cache entries
-            cleanup_interval_minutes: How often to run cleanup tasks
+            max_size: Maximum number of cache entries (reduced for 1.25GB memory)
+            cleanup_interval_minutes: How often to run cleanup tasks (more frequent)
         """
         self._cache: Dict[str, CacheEntry] = {}
-        self._max_size = max_size
-        self._cleanup_interval = timedelta(minutes=cleanup_interval_minutes)
+        self._max_size = max_size  # Reduced from 1000 to 500 for memory constraints
+        self._cleanup_interval = timedelta(minutes=cleanup_interval_minutes)  # More frequent cleanup
         self._last_cleanup = datetime.now(timezone.utc)
         self._lock = asyncio.Lock()
         self._stats = {
             'hits': 0,
             'misses': 0,
             'evictions': 0,
-            'expired_removals': 0
+            'expired_removals': 0,
+            'memory_usage_bytes': 0
         }
         
-        # Start background cleanup task
+        # Memory monitoring
+        self._memory_threshold_mb = 800  # 800MB threshold for 1.25GB total
         self._cleanup_task = None
         
     async def start(self):
@@ -211,9 +213,19 @@ class CacheManager:
             return len(keys_to_remove)
     
     async def _evict_entries(self) -> None:
-        """Evict entries based on LRU and strategy-based policies"""
+        """Evict entries based on LRU and strategy-based policies with memory awareness"""
         if not self._cache:
             return
+        
+        # Check memory usage first
+        memory_usage_mb = await self._get_memory_usage()
+        if memory_usage_mb > self._memory_threshold_mb:
+            # Aggressive eviction if memory is high
+            evict_percentage = 0.3  # Evict 30% of cache
+            logger.warning(f"High memory usage ({memory_usage_mb:.1f}MB), aggressive eviction")
+        else:
+            # Normal eviction
+            evict_percentage = 0.1  # Evict 10% of cache
         
         # Sort entries by eviction priority
         entries_with_priority = []
@@ -224,8 +236,8 @@ class CacheManager:
         # Sort by priority (lower priority = more likely to evict)
         entries_with_priority.sort(key=lambda x: x[0])
         
-        # Evict 10% of cache or at least 1 entry
-        evict_count = max(1, len(self._cache) // 10)
+        # Calculate eviction count
+        evict_count = max(1, int(len(self._cache) * evict_percentage))
         
         for i in range(min(evict_count, len(entries_with_priority))):
             _, key, _ = entries_with_priority[i]
@@ -281,24 +293,48 @@ class CacheManager:
                 logger.error(f"Error in cache cleanup loop: {e}")
     
     async def _cleanup_expired(self) -> None:
-        """Remove expired and old entries from cache"""
+        """Remove expired and old entries from cache with memory monitoring"""
         async with self._lock:
             now = datetime.now(timezone.utc)
             keys_to_remove = []
             
+            # Check memory usage and adjust cleanup strategy
+            memory_usage_mb = await self._get_memory_usage()
+            
             for key, entry in self._cache.items():
-                if entry.is_expired() or entry.should_evict():
+                should_remove = False
+                
+                # Always remove expired entries
+                if entry.is_expired():
+                    should_remove = True
+                    self._stats['expired_removals'] += 1
+                # Remove old entries based on memory pressure
+                elif entry.should_evict(max_age_hours=12 if memory_usage_mb > self._memory_threshold_mb else 24):
+                    should_remove = True
+                    self._stats['evictions'] += 1
+                
+                if should_remove:
                     keys_to_remove.append(key)
             
+            # Remove identified entries
             for key in keys_to_remove:
                 del self._cache[key]
-                if self._cache[key].is_expired():
-                    self._stats['expired_removals'] += 1
-                else:
-                    self._stats['evictions'] += 1
             
             if keys_to_remove:
-                logger.info(f"Cache cleanup: removed {len(keys_to_remove)} entries")
+                logger.info(f"Cache cleanup: removed {len(keys_to_remove)} entries (Memory: {memory_usage_mb:.1f}MB)")
+    
+    async def _get_memory_usage(self) -> float:
+        """Get current memory usage in MB"""
+        try:
+            import psutil
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            return memory_info.rss / 1024 / 1024  # Convert to MB
+        except ImportError:
+            # Fallback: estimate based on cache size
+            return len(self._cache) * 0.1  # Rough estimate: 0.1MB per entry
+        except Exception:
+            return 0.0
     
     def get_stats(self) -> Dict[str, Any]:
         """
@@ -318,7 +354,9 @@ class CacheManager:
             'misses': self._stats['misses'],
             'evictions': self._stats['evictions'],
             'expired_removals': self._stats['expired_removals'],
-            'memory_usage_estimate': len(self._cache) * 1024  # Rough estimate in bytes
+            'memory_usage_estimate': len(self._cache) * 1024,  # Rough estimate in bytes
+            'memory_threshold_mb': self._memory_threshold_mb,
+            'utilization_percent': round(len(self._cache) / self._max_size * 100, 2)
         }
 
 # Global cache manager instance
@@ -369,6 +407,38 @@ async def invalidate_guild_cache(guild_id: int) -> int:
     """Invalidate all cache entries for a specific guild"""
     pattern = f"guild_{guild_id}"
     return await cache_manager.invalidate_pattern(pattern)
+
+async def invalidate_rsvp_cache(post_id: str) -> int:
+    """
+    Invalidate RSVP-related cache entries for a specific post.
+    
+    Args:
+        post_id: UUID of the daily post
+        
+    Returns:
+        Number of cache entries invalidated
+    """
+    pattern = f"rsvp_responses:{post_id}"
+    return await cache_manager.invalidate_pattern(pattern)
+
+async def invalidate_rsvp_cache_for_guild(guild_id: int) -> int:
+    """
+    Invalidate all RSVP-related cache entries for a specific guild.
+    
+    Args:
+        guild_id: Discord guild ID
+        
+    Returns:
+        Number of cache entries invalidated
+    """
+    # Invalidate both guild-specific and RSVP-specific patterns
+    guild_pattern = f"guild_{guild_id}"
+    rsvp_pattern = "rsvp_responses"
+    
+    guild_invalidated = await cache_manager.invalidate_pattern(guild_pattern)
+    rsvp_invalidated = await cache_manager.invalidate_pattern(rsvp_pattern)
+    
+    return guild_invalidated + rsvp_invalidated
 
 async def get_cache_stats() -> Dict[str, Any]:
     """Get comprehensive cache statistics"""
