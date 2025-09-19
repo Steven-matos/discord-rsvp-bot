@@ -552,6 +552,9 @@ async def get_all_daily_posts_for_date(guild_id: int, event_date: date) -> List[
     """
     Get ALL daily posts for a specific date (handles multiple posts per day).
     
+    This function fetches live data directly from the database without caching
+    to ensure real-time accuracy for commands like view_rsvps.
+    
     Args:
         guild_id: Discord guild ID
         event_date: Date of the event
@@ -575,6 +578,9 @@ async def get_aggregated_rsvp_responses_for_date(guild_id: int, event_date: date
     """
     Get aggregated RSVP responses for all posts on a specific date.
     If a user has multiple RSVPs for the same date, returns their most recent response.
+    
+    This function fetches live data directly from the database without caching
+    to ensure real-time accuracy for commands like view_rsvps.
     
     Args:
         guild_id: Discord guild ID

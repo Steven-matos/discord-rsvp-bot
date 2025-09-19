@@ -84,16 +84,16 @@ class TaskManager:
     Provides priority-based execution, resource management, and comprehensive monitoring.
     """
     
-    def __init__(self, max_concurrent_tasks: int = 10, task_timeout_seconds: int = 300):
+    def __init__(self, max_concurrent_tasks: int = 3, task_timeout_seconds: int = 180):
         """
-        Initialize the task manager.
+        Initialize the task manager with memory-optimized settings.
         
         Args:
-            max_concurrent_tasks: Maximum number of concurrent tasks
-            task_timeout_seconds: Default timeout for task execution
+            max_concurrent_tasks: Maximum number of concurrent tasks (reduced for 1.25GB memory)
+            task_timeout_seconds: Default timeout for task execution (reduced for faster cleanup)
         """
-        self._max_concurrent_tasks = max_concurrent_tasks
-        self._task_timeout_seconds = task_timeout_seconds
+        self._max_concurrent_tasks = max_concurrent_tasks  # Reduced from 10 to 3
+        self._task_timeout_seconds = task_timeout_seconds  # Reduced from 300 to 180 seconds
         
         # Task management
         self._tasks: Dict[str, asyncio.Task] = {}
@@ -101,12 +101,12 @@ class TaskManager:
         self._task_queue: deque = deque()
         self._scheduled_tasks: Dict[str, asyncio.Task] = {}
         
-        # Resource management
+        # Resource management - optimized for 1.25GB memory
         self._resource_usage: Dict[str, float] = defaultdict(float)
         self._resource_limits: Dict[str, float] = {
-            'cpu': 80.0,      # CPU usage limit (%)
-            'memory': 512.0,  # Memory usage limit (MB)
-            'disk': 1000.0    # Disk usage limit (MB)
+            'cpu': 70.0,      # CPU usage limit (%) - reduced for stability
+            'memory': 800.0,  # Memory usage limit (MB) - 800MB for 1.25GB total
+            'disk': 800.0     # Disk usage limit (MB) - 800MB for 1.25GB total
         }
         
         # Performance monitoring

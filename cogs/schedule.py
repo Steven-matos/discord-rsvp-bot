@@ -1774,15 +1774,21 @@ class ScheduleCog(commands.Cog):
     
     @commands.slash_command(
         name="view_rsvps",
-        description="View RSVP responses for today's event"
+        description="View RSVP responses for today's event (live data, no caching)"
     )
     async def view_rsvps(self, inter: disnake.ApplicationCommandInteraction):
-        """View RSVP responses for today's event"""
+        """
+        View RSVP responses for today's event.
+        
+        This command always fetches live data directly from the database
+        without using any caching mechanisms to ensure real-time accuracy.
+        """
         guild_id = inter.guild.id
         # Use Eastern time to determine what day it is
         today = datetime.now(self.eastern_tz).date()
         
         # Get all posts for today (handles both automatic and manual posts)
+        # NOTE: Direct database call - no caching to ensure live data
         posts = await database.get_all_daily_posts_for_date(guild_id, today)
         if not posts:
             await inter.response.send_message(
@@ -1793,6 +1799,7 @@ class ScheduleCog(commands.Cog):
             return
         
         # Get aggregated RSVP responses from all posts for today
+        # NOTE: Direct database call - no caching to ensure live data
         rsvps = await database.get_aggregated_rsvp_responses_for_date(guild_id, today)
         
         # Use the most recent post for event details (they should all be the same event)

@@ -23,6 +23,8 @@ from core.backup_manager import backup_manager
 from core.database_optimizer import db_optimizer
 from core.task_manager import task_manager
 from core.security_manager import security_manager
+from core.memory_optimizer import memory_optimizer
+from core.resource_monitor import resource_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +63,9 @@ class PerformanceCog(commands.Cog):
             backup_manager.start(),
             db_optimizer.start(),
             task_manager.start(),
-            security_manager.start()
+            security_manager.start(),
+            memory_optimizer.start(),
+            resource_monitor.start()
         ]
         
         await asyncio.gather(*startup_tasks, return_exceptions=True)
@@ -75,7 +79,9 @@ class PerformanceCog(commands.Cog):
             backup_manager.stop(),
             db_optimizer.stop(),
             task_manager.stop(),
-            security_manager.stop()
+            security_manager.stop(),
+            memory_optimizer.stop(),
+            resource_monitor.stop()
         ]
         
         await asyncio.gather(*shutdown_tasks, return_exceptions=True)
@@ -347,6 +353,142 @@ class PerformanceCog(commands.Cog):
         except Exception as e:
             logger.error(f"Error in security_status command: {e}")
             await inter.response.send_message(f"❌ Error retrieving security status: {str(e)}", ephemeral=True)
+    
+    @commands.slash_command(
+        name="memory_optimization",
+        description="Get memory usage and optimization status (admin only)"
+    )
+    async def memory_optimization(self, inter: disnake.ApplicationCommandInteraction):
+        """Get memory optimization status and statistics"""
+        try:
+            if not self._check_admin_permissions(inter):
+                await inter.response.send_message("❌ This command requires admin permissions", ephemeral=True)
+                return
+            
+            if not self._systems_initialized:
+                await inter.response.send_message("❌ Performance systems not initialized", ephemeral=True)
+                return
+            
+            # Get memory statistics
+            memory_stats = await memory_optimizer.get_memory_stats()
+            optimization_stats = memory_optimizer.get_optimization_stats()
+            
+            # Create memory optimization embed
+            embed = disnake.Embed(
+                title="🧠 Memory Optimization Status",
+                description="Memory usage and optimization statistics",
+                color=disnake.Color.blue(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            
+            # Memory usage
+            embed.add_field(
+                name="📊 Memory Usage",
+                value=f"**Used:** {memory_stats.used_mb:.1f}MB\n"
+                      f"**Available:** {memory_stats.available_mb:.1f}MB\n"
+                      f"**Total:** {memory_stats.total_mb:.1f}MB\n"
+                      f"**Usage:** {memory_stats.usage_percent:.1f}%",
+                inline=True
+            )
+            
+            # Pressure level
+            pressure_color = {
+                "low": "🟢",
+                "medium": "🟡", 
+                "high": "🟠",
+                "critical": "🔴"
+            }
+            embed.add_field(
+                name="⚡ Pressure Level",
+                value=f"{pressure_color.get(memory_stats.pressure_level.value, '❓')} {memory_stats.pressure_level.value.title()}\n"
+                      f"**Threshold:** 800MB\n"
+                      f"**Status:** {'✅ Healthy' if memory_stats.usage_percent < 70 else '⚠️ Monitor' if memory_stats.usage_percent < 85 else '🚨 Critical'}",
+                inline=True
+            )
+            
+            # Optimization stats
+            embed.add_field(
+                name="🔧 Optimization Stats",
+                value=f"**GC Runs:** {optimization_stats['gc_runs']}\n"
+                      f"**Objects Cleaned:** {optimization_stats['objects_cleaned']}\n"
+                      f"**Memory Freed:** {optimization_stats['memory_freed_mb']:.1f}MB\n"
+                      f"**Triggers:** {optimization_stats['optimization_triggers']}",
+                inline=True
+            )
+            
+            # Tracked objects
+            embed.add_field(
+                name="📝 Tracking",
+                value=f"**Tracked Objects:** {optimization_stats['tracked_objects']}\n"
+                      f"**Cleanup Callbacks:** {optimization_stats['cleanup_callbacks']}",
+                inline=True
+            )
+            
+            embed.set_footer(text="Memory Optimization • Real-time Monitoring")
+            
+            await inter.response.send_message(embed=embed, ephemeral=True)
+            
+        except Exception as e:
+            logger.error(f"Error in memory_optimization command: {e}")
+            await inter.response.send_message(f"❌ Error retrieving memory status: {str(e)}", ephemeral=True)
+    
+    @commands.slash_command(
+        name="force_cleanup",
+        description="Force immediate memory cleanup (admin only)"
+    )
+    async def force_cleanup(self, inter: disnake.ApplicationCommandInteraction):
+        """Force immediate memory cleanup and optimization"""
+        try:
+            if not self._check_admin_permissions(inter):
+                await inter.response.send_message("❌ This command requires admin permissions", ephemeral=True)
+                return
+            
+            if not self._systems_initialized:
+                await inter.response.send_message("❌ Performance systems not initialized", ephemeral=True)
+                return
+            
+            await inter.response.defer(ephemeral=True)
+            
+            # Force memory cleanup
+            cleanup_results = await memory_optimizer.force_cleanup()
+            
+            # Create cleanup results embed
+            embed = disnake.Embed(
+                title="🧹 Memory Cleanup Results",
+                description="Forced memory cleanup completed",
+                color=disnake.Color.green(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            
+            embed.add_field(
+                name="📊 Cleanup Results",
+                value=f"**Memory Freed:** {cleanup_results['memory_freed_mb']:.1f}MB\n"
+                      f"**Pressure Level:** {cleanup_results['pressure_level']}\n"
+                      f"**Memory Before:** {cleanup_results['memory_before_mb']:.1f}MB\n"
+                      f"**Memory After:** {cleanup_results['memory_after_mb']:.1f}MB",
+                inline=False
+            )
+            
+            if cleanup_results['optimizations_applied']:
+                optimizations = "\n".join(cleanup_results['optimizations_applied'][:5])  # Show first 5
+                if len(cleanup_results['optimizations_applied']) > 5:
+                    optimizations += f"\n... and {len(cleanup_results['optimizations_applied']) - 5} more"
+                embed.add_field(
+                    name="🔧 Optimizations Applied",
+                    value=optimizations,
+                    inline=False
+                )
+            
+            embed.set_footer(text="Memory Cleanup • Forced Optimization")
+            
+            await inter.edit_original_response(embed=embed)
+            
+        except Exception as e:
+            logger.error(f"Error in force_cleanup command: {e}")
+            await inter.edit_original_response(
+                content=f"❌ Error during memory cleanup: {str(e)}",
+                embed=None
+            )
     
     async def _get_system_health(self) -> Dict[str, Any]:
         """Get comprehensive system health data"""

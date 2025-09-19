@@ -20,6 +20,8 @@ from core import (
     task_manager,
     security_manager
 )
+from core.memory_optimizer import memory_optimizer
+from core.resource_monitor import resource_monitor
 
 # Set up logging for better monitoring
 logging.basicConfig(
@@ -73,7 +75,7 @@ async def _handle_database_operation_async(operation_name: str, operation_func):
         logger.error(f"Failed to {operation_name.lower()}: {e}")
 
 async def _initialize_core_systems():
-    """Initialize all core performance and security systems"""
+    """Initialize all core performance and security systems with memory optimization"""
     # Start all systems in parallel for faster initialization
     startup_tasks = [
         cache_manager.start(),
@@ -81,25 +83,29 @@ async def _initialize_core_systems():
         backup_manager.start(),
         db_optimizer.start(),
         task_manager.start(),
-        security_manager.start()
+        security_manager.start(),
+        memory_optimizer.start(),
+        resource_monitor.start()
     ]
     
     await asyncio.gather(*startup_tasks, return_exceptions=True)
-    logger.info("All core systems initialized")
+    logger.info("All core systems initialized with memory optimization")
 
 async def _shutdown_core_systems():
-    """Shutdown all core systems"""
+    """Shutdown all core systems with memory cleanup"""
     shutdown_tasks = [
         cache_manager.stop(),
         error_monitor.stop(),
         backup_manager.stop(),
         db_optimizer.stop(),
         task_manager.stop(),
-        security_manager.stop()
+        security_manager.stop(),
+        memory_optimizer.stop(),
+        resource_monitor.stop()
     ]
     
     await asyncio.gather(*shutdown_tasks, return_exceptions=True)
-    logger.info("All core systems shutdown")
+    logger.info("All core systems shutdown with memory cleanup")
 
 
 
