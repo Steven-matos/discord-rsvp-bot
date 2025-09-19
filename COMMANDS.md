@@ -226,6 +226,27 @@ Get security monitoring and threat detection status.
 - **Shows**: Security events, threat counts, active rules, recent security events
 - **Access**: Admin permissions required
 
+#### `/clear_cache`
+Clear all cache entries to force fresh data.
+- **Usage**: No parameters needed
+- **Shows**: Cache statistics after clearing
+- **Access**: Admin permissions required
+- **Use Case**: When RSVP data appears stale or outdated
+
+#### `/validate_rsvp_data`
+Validate RSVP data integrity and check for missing RSVPs.
+- **Usage**: No parameters needed
+- **Shows**: Data integrity check results, missing RSVPs, recommendations
+- **Access**: Admin permissions required
+- **Use Case**: After timezone changes or when RSVP data seems incomplete
+
+#### `/migrate_rsvp_data`
+Migrate RSVP data for timezone changes.
+- **Usage**: No parameters needed
+- **Shows**: Migration results, RSVPs processed, data integrity status
+- **Access**: Admin permissions required
+- **Use Case**: When changing bot timezone to ensure all RSVP data is preserved
+
 ---
 
 ## 🔄 Automatic Features

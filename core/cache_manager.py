@@ -408,6 +408,38 @@ async def invalidate_guild_cache(guild_id: int) -> int:
     pattern = f"guild_{guild_id}"
     return await cache_manager.invalidate_pattern(pattern)
 
+async def invalidate_rsvp_cache(post_id: str) -> int:
+    """
+    Invalidate RSVP-related cache entries for a specific post.
+    
+    Args:
+        post_id: UUID of the daily post
+        
+    Returns:
+        Number of cache entries invalidated
+    """
+    pattern = f"rsvp_responses:{post_id}"
+    return await cache_manager.invalidate_pattern(pattern)
+
+async def invalidate_rsvp_cache_for_guild(guild_id: int) -> int:
+    """
+    Invalidate all RSVP-related cache entries for a specific guild.
+    
+    Args:
+        guild_id: Discord guild ID
+        
+    Returns:
+        Number of cache entries invalidated
+    """
+    # Invalidate both guild-specific and RSVP-specific patterns
+    guild_pattern = f"guild_{guild_id}"
+    rsvp_pattern = "rsvp_responses"
+    
+    guild_invalidated = await cache_manager.invalidate_pattern(guild_pattern)
+    rsvp_invalidated = await cache_manager.invalidate_pattern(rsvp_pattern)
+    
+    return guild_invalidated + rsvp_invalidated
+
 async def get_cache_stats() -> Dict[str, Any]:
     """Get comprehensive cache statistics"""
     return cache_manager.get_stats()

@@ -46,7 +46,28 @@ bot_start_time = None
 reconnect_attempts = 0
 MAX_RECONNECT_ATTEMPTS = 5
 
+# Specific user IDs that have access to all admin commands
+ADMIN_USER_IDS = [300157754012860425, 1354616827380236409]
+
 # DRY Helper Methods
+def _check_admin_permissions(inter: disnake.ApplicationCommandInteraction) -> bool:
+    """
+    Check if user has admin permissions or is a specific admin user.
+    
+    Args:
+        inter: Discord interaction object
+        
+    Returns:
+        True if user has admin access, False otherwise
+    """
+    # Check if user has administrator permissions
+    if inter.author.guild_permissions.administrator:
+        return True
+    # Check if user is one of the specific admin users
+    if inter.author.id in ADMIN_USER_IDS:
+        return True
+    return False
+
 def _calculate_uptime() -> str:
     """Helper method to calculate and format bot uptime"""
     if bot_start_time:
@@ -214,13 +235,248 @@ async def bot_status(inter: disnake.ApplicationCommandInteraction):
         await inter.response.send_message("❌ Bot status not available", ephemeral=True)
 
 @bot.slash_command(
+    name="validate_rsvp_data",
+    description="Validate RSVP data integrity and check for missing RSVPs (Admin only)"
+)
+async def validate_rsvp_data(inter: disnake.ApplicationCommandInteraction):
+    """Validate RSVP data integrity and check for missing RSVPs"""
+    # Check if user has admin permissions
+    if not _check_admin_permissions(inter):
+        await inter.response.send_message("❌ This command requires administrator permissions", ephemeral=True)
+        return
+    
+    try:
+        await inter.response.defer(ephemeral=True)
+        
+        # Validate RSVP data integrity
+        from utils.rsvp_migration import validate_rsvp_data_integrity
+        validation_result = await validate_rsvp_data_integrity(inter.guild.id)
+        
+        # Create response embed
+        embed = disnake.Embed(
+            title="🔍 RSVP Data Validation",
+            description="RSVP data integrity check results",
+            color=disnake.Color.green() if validation_result['data_integrity_ok'] else disnake.Color.orange()
+        )
+        
+        embed.add_field(
+            name="Guild ID",
+            value=str(validation_result['guild_id']),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Date",
+            value=validation_result.get('date', 'Unknown'),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Timezone",
+            value=validation_result.get('timezone', 'Unknown'),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Standard Method Count",
+            value=str(validation_result.get('standard_count', 0)),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Comprehensive Count",
+            value=str(validation_result.get('comprehensive_count', 0)),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Data Integrity",
+            value="✅ Good" if validation_result['data_integrity_ok'] else "⚠️ Issues Found",
+            inline=True
+        )
+        
+        if validation_result.get('missing_rsvps', 0) > 0:
+            embed.add_field(
+                name="Missing RSVPs",
+                value=f"{validation_result['missing_rsvps']} RSVPs might be missed",
+                inline=False
+            )
+        
+        if validation_result.get('extra_rsvps', 0) > 0:
+            embed.add_field(
+                name="Extra RSVPs",
+                value=f"{validation_result['extra_rsvps']} RSVPs in standard method",
+                inline=False
+            )
+        
+        # Add recommendations
+        if validation_result.get('recommendations'):
+            recommendations = "\n".join([f"• {rec}" for rec in validation_result['recommendations']])
+            embed.add_field(
+                name="Recommendations",
+                value=recommendations,
+                inline=False
+            )
+        
+        await inter.edit_original_response(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error in validate RSVP data command: {e}")
+        await inter.edit_original_response(
+            content=f"❌ An error occurred during validation: {e}",
+            embed=None
+        )
+
+@bot.slash_command(
+    name="migrate_rsvp_data",
+    description="Migrate RSVP data for timezone changes (Admin only)"
+)
+async def migrate_rsvp_data(inter: disnake.ApplicationCommandInteraction):
+    """Migrate RSVP data when timezone changes occur"""
+    # Check if user has admin permissions
+    if not _check_admin_permissions(inter):
+        await inter.response.send_message("❌ This command requires administrator permissions", ephemeral=True)
+        return
+    
+    try:
+        await inter.response.defer(ephemeral=True)
+        
+        # Migrate RSVP data
+        from utils.rsvp_migration import migrate_timezone_data
+        migration_result = await migrate_timezone_data(inter.guild.id)
+        
+        # Create response embed
+        embed = disnake.Embed(
+            title="🔄 RSVP Data Migration",
+            description="RSVP data migration results",
+            color=disnake.Color.green() if migration_result['migration_successful'] else disnake.Color.red()
+        )
+        
+        embed.add_field(
+            name="Guild ID",
+            value=str(migration_result['guild_id']),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Migration Date",
+            value=migration_result.get('migration_date', 'Unknown'),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Timezone",
+            value=migration_result.get('timezone', 'Unknown'),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="RSVPs Processed",
+            value=str(migration_result.get('rsvps_processed', 0)),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Date Range",
+            value=migration_result.get('date_range', 'Unknown'),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Status",
+            value="✅ Successful" if migration_result['migration_successful'] else "❌ Failed",
+            inline=True
+        )
+        
+        # Add validation results if available
+        if 'validation' in migration_result:
+            validation = migration_result['validation']
+            embed.add_field(
+                name="Data Integrity",
+                value="✅ Good" if validation.get('data_integrity_ok', False) else "⚠️ Issues Found",
+                inline=True
+            )
+        
+        # Add recommendations
+        if migration_result.get('recommendations'):
+            recommendations = "\n".join([f"• {rec}" for rec in migration_result['recommendations']])
+            embed.add_field(
+                name="Recommendations",
+                value=recommendations,
+                inline=False
+            )
+        
+        await inter.edit_original_response(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error in migrate RSVP data command: {e}")
+        await inter.edit_original_response(
+            content=f"❌ An error occurred during migration: {e}",
+            embed=None
+        )
+
+@bot.slash_command(
+    name="clear_cache",
+    description="Clear all cache entries to force fresh data (Admin only)"
+)
+async def clear_cache(inter: disnake.ApplicationCommandInteraction):
+    """Manually clear all cache entries to force fresh data"""
+    # Check if user has admin permissions
+    if not _check_admin_permissions(inter):
+        await inter.response.send_message("❌ This command requires administrator permissions", ephemeral=True)
+        return
+    
+    try:
+        await inter.response.defer(ephemeral=True)
+        
+        # Clear all cache entries
+        from core.cache_manager import cache_manager
+        await cache_manager.clear()
+        
+        # Get cache stats after clearing
+        stats = cache_manager.get_stats()
+        
+        embed = disnake.Embed(
+            title="🧹 Cache Cleared",
+            description="All cache entries have been cleared successfully",
+            color=disnake.Color.green()
+        )
+        
+        embed.add_field(
+            name="Cache Size",
+            value=f"{stats['size']} entries",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Hit Rate",
+            value=f"{stats['hit_rate']}%",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Memory Usage",
+            value=f"{stats['memory_usage_estimate']} bytes",
+            inline=True
+        )
+        
+        await inter.edit_original_response(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error in clear cache command: {e}")
+        await inter.edit_original_response(
+            content=f"❌ An error occurred while clearing cache: {e}",
+            embed=None
+        )
+
+@bot.slash_command(
     name="cleanup_guilds",
     description="Manually trigger guild cleanup to remove orphaned database records (Admin only)"
 )
 async def cleanup_guilds(inter: disnake.ApplicationCommandInteraction):
     """Manually trigger guild cleanup to remove orphaned database records"""
-    # Check if user has administrator permissions
-    if not inter.author.guild_permissions.administrator:
+    # Check if user has admin permissions
+    if not _check_admin_permissions(inter):
         await inter.response.send_message("❌ This command requires administrator permissions", ephemeral=True)
         return
     

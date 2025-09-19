@@ -619,7 +619,7 @@ async def get_aggregated_rsvp_responses_for_date(guild_id: int, event_date: date
 
 async def save_rsvp_response(post_id: str, user_id: int, guild_id: int, response_type: str) -> bool:
     """
-    Save an RSVP response to the database.
+    Save an RSVP response to the database and invalidate related cache entries.
     
     Args:
         post_id: UUID of the daily post
@@ -652,6 +652,17 @@ async def save_rsvp_response(post_id: str, user_id: int, guild_id: int, response
                 'response_type': response_type
             }
             result = client.table('rsvp_responses').insert(insert_data).execute()
+        
+        # Invalidate cache entries related to this RSVP response
+        try:
+            from core.cache_manager import invalidate_rsvp_cache_for_guild
+            # Invalidate all RSVP-related cache entries for this guild
+            invalidated_count = await invalidate_rsvp_cache_for_guild(guild_id)
+            
+            print(f"Cache invalidated for RSVP response: post_id={post_id}, guild_id={guild_id}, entries_cleared={invalidated_count}")
+        except Exception as cache_error:
+            # Don't fail the RSVP save if cache invalidation fails
+            print(f"Warning: Cache invalidation failed for RSVP response: {cache_error}")
         
         return True
         

@@ -21,9 +21,6 @@ pytz>=2023.3
 # System monitoring (for bot monitoring features)
 psutil>=5.9.0
 
-# Memory optimization and resource monitoring
-weakref  # Built-in Python module for weak references
-
 # Data validation and serialization
 pydantic>=2.0.0
 
