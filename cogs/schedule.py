@@ -764,8 +764,8 @@ class ScheduleCog(commands.Cog):
     async def delete_todays_existing_posts(self, guild_id: int, channel: disnake.TextChannel):
         """Delete any existing bot posts from today before posting new ones"""
         try:
-            # Use Eastern time to determine what day it is
-            today = datetime.now(self.eastern_tz).date()
+            # Use configured timezone to determine what day it is
+            today = self.timezone_manager.today()
             
             # Get today's existing post from database
             existing_post = await database.get_daily_post(guild_id, today)
@@ -816,10 +816,10 @@ class ScheduleCog(commands.Cog):
             if not schedule_updated:
                 return False
             
-            # Get the start of the current week (Monday) using Eastern time
-            today_eastern = datetime.now(self.eastern_tz)
-            days_since_monday = today_eastern.weekday()
-            start_of_week = today_eastern - timedelta(days=days_since_monday)
+            # Get the start of the current week (Monday) using configured timezone
+            today_local = self.timezone_manager.now()
+            days_since_monday = today_local.weekday()
+            start_of_week = today_local - timedelta(days=days_since_monday)
             start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
             
             # Check if schedule was updated this week
@@ -832,8 +832,8 @@ class ScheduleCog(commands.Cog):
     async def notify_admins_no_schedule(self, guild: disnake.Guild, channel: disnake.TextChannel):
         """Notify admins that the current week's schedule hasn't been set up"""
         try:
-            # Check if we've already notified today (using Eastern time)
-            today = datetime.now(self.eastern_tz).date()
+            # Check if we've already notified today (using configured timezone)
+            today = self.timezone_manager.today()
             if await database.check_admin_notification_sent(guild.id, today):
                 return  # Already notified today
             
@@ -883,8 +883,8 @@ class ScheduleCog(commands.Cog):
     async def check_and_send_reminders(self):
         """Check all guilds and send reminders if needed"""
         try:
-            now_eastern = datetime.now(self.eastern_tz)
-            print(f"[REMINDER] Checking reminders at {now_eastern.strftime('%H:%M:%S')} Eastern")
+            now_local = self.timezone_manager.now()
+            print(f"[REMINDER] Checking reminders at {now_local.strftime('%H:%M:%S')} {self.timezone_manager.display_name}")
             
             # Get all guilds with reminder settings
             guilds_data = await database.get_guilds_needing_reminders()
@@ -899,8 +899,8 @@ class ScheduleCog(commands.Cog):
                     print(f"[REMINDER] Guild {guild_id} has reminders disabled, skipping")
                     continue
                 
-                # Get today's event (using Eastern time to determine the day)
-                today = datetime.now(self.eastern_tz).date()
+                # Get today's event (using configured timezone to determine the day)
+                today = self.timezone_manager.today()
                 post_data = await database.get_daily_post(guild_id, today)
                 
                 if not post_data:
@@ -917,16 +917,16 @@ class ScheduleCog(commands.Cog):
     async def check_guild_reminders(self, guild_id: int, post_data: dict, settings: dict):
         """Check and send reminders for a specific guild"""
         try:
-            # Get event time from settings (stored in Eastern time)
+            # Get event time from settings (stored in configured timezone)
             event_time_str = settings.get('event_time', '20:00:00')
             event_time = datetime.strptime(event_time_str, '%H:%M:%S').time()
             
-            # Create event datetime in Eastern time
-            today = datetime.now(self.eastern_tz).date()
-            eastern_now = datetime.now(self.eastern_tz)
-            current_minute_key = eastern_now.replace(second=0, microsecond=0)
+            # Create event datetime in configured timezone
+            today = self.timezone_manager.today()
+            local_now = self.timezone_manager.now()
+            current_minute_key = local_now.replace(second=0, microsecond=0)
             
-            event_datetime_eastern = eastern_now.replace(
+            event_datetime_local = local_now.replace(
                 year=today.year, 
                 month=today.month, 
                 day=today.day,
@@ -937,15 +937,15 @@ class ScheduleCog(commands.Cog):
             )
             
             # Convert to UTC for comparison
-            event_datetime_utc = event_datetime_eastern.astimezone(timezone.utc)
+            event_datetime_utc = self.timezone_manager.to_utc(event_datetime_local)
             
-            print(f"[REMINDER] Checking reminders for guild {guild_id} at {eastern_now.strftime('%H:%M:%S')} Eastern")
-            print(f"[REMINDER] Event time: {event_time_str}, Current time: {eastern_now.strftime('%H:%M:%S')}")
+            print(f"[REMINDER] Checking reminders for guild {guild_id} at {local_now.strftime('%H:%M:%S')} {self.timezone_manager.display_name}")
+            print(f"[REMINDER] Event time: {event_time_str}, Current time: {local_now.strftime('%H:%M:%S')}")
             
-            # Check for 4:00 PM Eastern reminder (within 5-minute window: 16:00-16:04)
+            # Check for 4:00 PM reminder (within 5-minute window: 16:00-16:04)
             if (settings.get('reminder_enabled', True) and 
                 settings.get('reminder_4pm', True) and
-                eastern_now.hour == 16 and eastern_now.minute < 5):  # 4:00-4:04 PM Eastern
+                local_now.hour == 16 and local_now.minute < 5):  # 4:00-4:04 PM
                 
                 reminder_key = (guild_id, '4pm')
                 if self._check_duplicate_prevention(self.last_reminder_times, reminder_key, current_minute_key, "REMINDER", f"4pm reminder for guild {guild_id}"):
@@ -958,11 +958,11 @@ class ScheduleCog(commands.Cog):
                     self.last_reminder_times[reminder_key] = current_minute_key
             
             # Check for 1 hour before event reminder (within 5-minute window)
-            one_hour_before = event_datetime_eastern - timedelta(hours=1)
+            one_hour_before = event_datetime_local - timedelta(hours=1)
             one_hour_before_window_end = one_hour_before + timedelta(minutes=4)  # 5-minute window
             
             if (settings.get('reminder_1_hour', True) and 
-                one_hour_before <= eastern_now <= one_hour_before_window_end):
+                one_hour_before <= local_now <= one_hour_before_window_end):
                 
                 reminder_key = (guild_id, '1_hour')
                 if self._check_duplicate_prevention(self.last_reminder_times, reminder_key, current_minute_key, "REMINDER", f"1_hour reminder for guild {guild_id}"):
@@ -975,11 +975,11 @@ class ScheduleCog(commands.Cog):
                     self.last_reminder_times[reminder_key] = current_minute_key
             
             # Check for 15 minutes before event reminder (within 5-minute window)
-            fifteen_min_before = event_datetime_eastern - timedelta(minutes=15)
+            fifteen_min_before = event_datetime_local - timedelta(minutes=15)
             fifteen_min_before_window_end = fifteen_min_before + timedelta(minutes=4)  # 5-minute window
             
             if (settings.get('reminder_15_minutes', True) and 
-                fifteen_min_before <= eastern_now <= fifteen_min_before_window_end):
+                fifteen_min_before <= local_now <= fifteen_min_before_window_end):
                 
                 reminder_key = (guild_id, '15_minutes')
                 if self._check_duplicate_prevention(self.last_reminder_times, reminder_key, current_minute_key, "REMINDER", f"15_minutes reminder for guild {guild_id}"):
@@ -1029,29 +1029,29 @@ class ScheduleCog(commands.Cog):
         
         # Convert UTC time to user-friendly display
         # Note: We can't know each user's timezone, so we'll show multiple timezones
-        eastern_datetime = event_datetime_utc.astimezone(self.eastern_tz)
-        eastern_time, utc_time = self._format_time_display(eastern_datetime, event_datetime_utc)
+        local_datetime = self.timezone_manager.from_utc(event_datetime_utc)
+        local_time, utc_time = self._format_time_display(local_datetime, event_datetime_utc)
         
         # Set embed properties based on reminder type
         if reminder_type == '4pm':
             title = "📢 Afternoon Event Reminder"
             color = disnake.Color.blue()
-            time_text = f"**Event starts at:** {eastern_time} / {utc_time}"
+            time_text = f"**Event starts at:** {local_time} / {utc_time}"
             footer = "Don't forget to RSVP if you haven't already!"
         elif reminder_type == '1_hour':
             title = "🔔 Event Reminder - 1 Hour"
             color = disnake.Color.orange()
-            time_text = f"**Event starts at:** {eastern_time} / {utc_time}"
+            time_text = f"**Event starts at:** {local_time} / {utc_time}"
             footer = "Don't forget to RSVP if you haven't already!"
         elif reminder_type == '15_minutes':
             title = "🚨 Final Reminder - 15 Minutes"
             color = disnake.Color.red()
-            time_text = f"**Event starts at:** {eastern_time} / {utc_time}"
+            time_text = f"**Event starts at:** {local_time} / {utc_time}"
             footer = "Last chance to join!"
         else:
             title = "📢 Event Reminder"
             color = disnake.Color.blue()
-            time_text = f"**Event starts at:** {eastern_time} / {utc_time}"
+            time_text = f"**Event starts at:** {local_time} / {utc_time}"
             footer = "Event reminder"
         
         embed = disnake.Embed(
@@ -1159,35 +1159,16 @@ class ScheduleCog(commands.Cog):
             "__**🔧 Advanced Diagnostics**__",
             "**🔍 `/debug_auto_posting`** - Diagnose why automatic daily posts aren't working. Shows timing, settings, and schedule status.",
             "",
-            "**🧪 `/test_auto_posting`** - Manually trigger the automatic posting check to see what happens right now (with debug logs).",
-            "",
-            "**🔄 `/restart_daily_task`** - Restart the automatic posting task if it's not working properly.",
-            "",
-            "**⚠️ `/rate_limit_status`** - Check if your server might be causing Discord rate limiting issues. Shows risk level and recommendations.",
             "",
             "**🔍 `/debug_view_rsvps`** - Debug why view_rsvps isn't finding posts when they exist.",
             "",
             "**🔍 `/debug_reminders`** - Debug why reminders are not being sent out. Shows complete system diagnosis.",
             "",
-            "**🧪 `/test_reminder`** - Manually trigger reminder checks to test if the system is working.",
-            "",
-            "**🔄 `/reset_reminder_tracking`** - Reset reminder tracking to test reminders again today (debugging only).",
             "",
             "__**🔧 System Information**__",
             "**🤖 `/bot_status`** - Is the bot working properly? Check here if things seem slow.",
             "",
-            "**🔍 `/monitor_status`** - Detailed bot health info (for tech-savvy users).",
-            "",
-            "**🔧 `/test_database`** - Test database connection and show configuration details.",
-            "",
-            "**⚙️ `/server_settings`** - Show all bot settings configured for this server.",
-            "",
-            "__**🚀 Performance Monitoring**__",
-            "**🏥 `/system_health`** - Get comprehensive system health and performance metrics.",
-            "",
-            "**📈 `/performance_metrics`** - Get detailed performance analysis and optimization insights.",
-            "",
-            "**🔒 `/security_status`** - Get security monitoring and threat detection status.",
+            "**🧹 `/clear_cache`** - Clear all cache entries to force fresh data.",
             "",
             "__**📋 Navigation**__",
             "**📋 `/list_commands`** - Return to the main commands list for regular bot features."
@@ -1440,10 +1421,10 @@ class ScheduleCog(commands.Cog):
             
             if success:
                 # Convert to 12-hour format for display
-                eastern_time = datetime.strptime(time_str, '%H:%M:%S').strftime('%I:%M %p')
+                local_time = datetime.strptime(time_str, '%H:%M:%S').strftime('%I:%M %p')
                 await inter.response.send_message(
                     f"✅ **Event Time Set!**\n"
-                    f"Events will start at **{eastern_time} Eastern Time**\n"
+                    f"Events will start at **{local_time} {self.timezone_manager.display_name}**\n"
                     f"Reminders will be sent automatically based on your settings.",
                     ephemeral=True
                 )
@@ -1499,10 +1480,10 @@ class ScheduleCog(commands.Cog):
             
             if success:
                 # Convert to 12-hour format for display
-                eastern_time = datetime.strptime(time_str, '%H:%M:%S').strftime('%I:%M %p')
+                local_time = datetime.strptime(time_str, '%H:%M:%S').strftime('%I:%M %p')
                 await inter.response.send_message(
                     f"✅ **Daily Posting Time Set!**\n"
-                    f"Daily event posts will be created at **{eastern_time} Eastern Time**\n"
+                    f"Daily event posts will be created at **{local_time} {self.timezone_manager.display_name}**\n"
                     f"This is when the RSVP post appears in your event channel each day.",
                     ephemeral=True
                 )
@@ -2086,10 +2067,10 @@ class ScheduleCog(commands.Cog):
         try:
             guild_id = inter.guild.id
             
-            # Get the start of the current week (Monday) using Eastern time
-            today_eastern = datetime.now(self.eastern_tz)
-            days_since_monday = today_eastern.weekday()
-            start_of_week = today_eastern - timedelta(days=days_since_monday)
+            # Get the start of the current week (Monday) using configured timezone
+            today_local = self.timezone_manager.now()
+            days_since_monday = today_local.weekday()
+            start_of_week = today_local - timedelta(days=days_since_monday)
             monday = start_of_week.date()
             
             # Calculate Tuesday and Wednesday
@@ -2371,10 +2352,10 @@ class ScheduleCog(commands.Cog):
         try:
             guild_id = inter.guild.id
             
-            # Get the start of the current week (Monday) using Eastern time
-            today_eastern = datetime.now(self.eastern_tz)
-            days_since_monday = today_eastern.weekday()
-            start_of_week = today_eastern - timedelta(days=days_since_monday)
+            # Get the start of the current week (Monday) using configured timezone
+            today_local = self.timezone_manager.now()
+            days_since_monday = today_local.weekday()
+            start_of_week = today_local - timedelta(days=days_since_monday)
             monday = start_of_week.date()
             
             # Calculate Sunday (end of week)
@@ -2665,8 +2646,8 @@ class ScheduleCog(commands.Cog):
         
         try:
             guild_id = inter.guild.id
-            # Use Eastern time to determine what day it is
-            today = datetime.now(self.eastern_tz).date()
+            # Use configured timezone to determine what day it is
+            today = self.timezone_manager.today()
             
             # Send initial status update
             try:
@@ -2936,8 +2917,8 @@ class ScheduleCog(commands.Cog):
         try:
             guild_id = inter.guild.id
             
-            # Get yesterday's date as cutoff using Eastern time (delete posts older than yesterday)
-            yesterday = datetime.now(self.eastern_tz).date() - timedelta(days=1)
+            # Get yesterday's date as cutoff using configured timezone (delete posts older than yesterday)
+            yesterday = self.timezone_manager.today() - timedelta(days=1)
             
             # Get all old posts for this guild
             old_posts = await database.get_old_daily_posts(yesterday)
@@ -3113,8 +3094,8 @@ class ScheduleCog(commands.Cog):
                     f"Your weekly event schedule has been set up for **{inter.guild.name}**.\n\n"
                     f"**Next Steps:**\n"
                     f"1. Use `/set_event_channel` to set where events will be posted\n"
-                    f"2. Use `/test_daily_event` to test the posting system\n"
-                    f"3. Use `/test_reminder` to test the reminder system"
+                    f"2. Use `/debug_auto_posting` to test the posting system\n"
+                    f"3. Use `/debug_reminders` to test the reminder system"
                 )
                 
                 # Remove guild from setup tracking
@@ -3236,9 +3217,9 @@ class ScheduleCog(commands.Cog):
         try:
             guild_id = inter.guild.id
             
-            # Get today's date using Eastern timezone (same as view_rsvps)
-            today_eastern = datetime.now(self.eastern_tz)
-            today_date = today_eastern.date()
+            # Get today's date using configured timezone (same as view_rsvps)
+            today_local = self.timezone_manager.now()
+            today_date = today_local.date()
             
             # Get yesterday and tomorrow for comparison
             yesterday = today_date - timedelta(days=1)
@@ -3254,7 +3235,7 @@ class ScheduleCog(commands.Cog):
             # Show timezone and date info
             embed.add_field(
                 name="📅 Date Information",
-                value=f"**Current Eastern Time:** {today_eastern.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
+                value=f"**Current {self.timezone_manager.display_name} Time:** {today_local.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
                       f"**Today's Date:** {today_date.isoformat()}\n"
                       f"**Yesterday:** {yesterday.isoformat()}\n"
                       f"**Tomorrow:** {tomorrow.isoformat()}\n"
@@ -3343,307 +3324,7 @@ class ScheduleCog(commands.Cog):
                 f"An error occurred while debugging: {str(e)}"
             )
 
-    @commands.slash_command(
-        name="test_database",
-        description="Test database connection and show configuration (admin only)"
-    )
-    async def test_database(self, inter: disnake.ApplicationCommandInteraction):
-        """Test database connection and show configuration details"""
-        # Check permissions
-        if not check_admin_or_specific_user(inter):
-            await inter.response.send_message(
-                "❌ You don't have permission to use this command.",
-                ephemeral=True
-            )
-            return
-        
-        await inter.response.defer(ephemeral=True)
-        
-        try:
-            # Get environment variables
-            supabase_url = os.getenv('SUPABASE_URL')
-            supabase_key = os.getenv('SUPABASE_KEY')
-            
-            # Create test embed
-            embed = disnake.Embed(
-                title="🔧 Database Connection Test",
-                description="Testing connection to Supabase database",
-                color=disnake.Color.blue()
-            )
-            
-            # Show configuration (mask sensitive info)
-            if supabase_url:
-                # Show URL but mask sensitive parts
-                masked_url = supabase_url[:30] + "..." + supabase_url[-10:] if len(supabase_url) > 40 else supabase_url
-                embed.add_field(
-                    name="🌐 Database URL",
-                    value=f"**Status:** {'✅ Set' if supabase_url else '❌ Not Set'}\n"
-                          f"**URL:** `{masked_url}`\n"
-                          f"**Length:** {len(supabase_url)} characters",
-                    inline=False
-                )
-            else:
-                embed.add_field(
-                    name="🌐 Database URL",
-                    value="❌ **SUPABASE_URL not set in environment variables**",
-                    inline=False
-                )
-            
-            if supabase_key:
-                embed.add_field(
-                    name="🔑 Database Key",
-                    value=f"**Status:** {'✅ Set' if supabase_key else '❌ Not Set'}\n"
-                          f"**Key:** `{supabase_key[:20]}...`\n"
-                          f"**Length:** {len(supabase_key)} characters",
-                    inline=False
-                )
-            else:
-                embed.add_field(
-                    name="🔑 Database Key",
-                    value="❌ **SUPABASE_KEY not set in environment variables**",
-                    inline=False
-                )
-            
-            # Test actual connection
-            connection_status = "🔄 Testing connection..."
-            embed.add_field(
-                name="🔗 Connection Test",
-                value=connection_status,
-                inline=False
-            )
-            
-            await inter.edit_original_message(embed=embed)
-            
-            # Now test the actual connection
-            try:
-                client = database.get_supabase_client()
-                
-                # Try a simple query
-                result = client.table('weekly_schedules').select('guild_id').limit(1).execute()
-                
-                # Update embed with success
-                embed.set_field_at(
-                    -1,  # Last field (Connection Test)
-                    name="🔗 Connection Test",
-                    value="✅ **Connection Successful!**\n"
-                          "Successfully connected to Supabase database.",
-                    inline=False
-                )
-                embed.color = disnake.Color.green()
-                
-            except Exception as conn_error:
-                # Update embed with error details
-                error_msg = str(conn_error)
-                
-                # Provide specific help for common errors
-                if "Name or service not known" in error_msg:
-                    help_text = "\n\n**Possible Solutions:**\n" \
-                               "• Check your SUPABASE_URL is correct\n" \
-                               "• Ensure you have internet connectivity\n" \
-                               "• Try restarting the bot\n" \
-                               "• Check if your Supabase project is active"
-                elif "401" in error_msg or "Unauthorized" in error_msg:
-                    help_text = "\n\n**Possible Solutions:**\n" \
-                               "• Check your SUPABASE_KEY is correct\n" \
-                               "• Ensure the key has proper permissions\n" \
-                               "• Try regenerating the key in Supabase dashboard"
-                else:
-                    help_text = "\n\n**Possible Solutions:**\n" \
-                               "• Check your environment variables\n" \
-                               "• Restart the bot\n" \
-                               "• Check Supabase project status"
-                
-                embed.set_field_at(
-                    -1,  # Last field (Connection Test)
-                    name="🔗 Connection Test",
-                    value=f"❌ **Connection Failed!**\n"
-                          f"**Error:** {error_msg[:200]}{'...' if len(error_msg) > 200 else ''}{help_text}",
-                    inline=False
-                )
-                embed.color = disnake.Color.red()
-            
-            await inter.edit_original_message(embed=embed)
-            
-        except Exception as e:
-            await inter.edit_original_message(
-                f"❌ **Error Testing Connection**\n"
-                f"An error occurred while testing the database connection: {str(e)}"
-            )
 
-    @commands.slash_command(
-        name="server_settings",
-        description="Show all bot settings for this server (admin only)"
-    )
-    async def server_settings(self, inter: disnake.ApplicationCommandInteraction):
-        """Show all bot settings for this server"""
-        # Check permissions
-        if not check_admin_or_specific_user(inter):
-            await inter.response.send_message(
-                "❌ You don't have permission to use this command.",
-                ephemeral=True
-            )
-            return
-        
-        await inter.response.defer(ephemeral=True)
-        
-        try:
-            guild_id = inter.guild.id
-            
-            # Get guild settings from database
-            guild_settings = await database.get_guild_settings(guild_id)
-            
-            # Create settings embed
-            embed = disnake.Embed(
-                title="⚙️ Server Settings",
-                description=f"Bot configuration for **{inter.guild.name}**",
-                color=disnake.Color.blue(),
-                timestamp=datetime.now(timezone.utc)
-            )
-            
-            # Event Channel Settings
-            event_channel_id = guild_settings.get('event_channel_id')
-            if event_channel_id:
-                event_channel = inter.guild.get_channel(event_channel_id)
-                channel_status = f"<#{event_channel_id}>" if event_channel else f"⚠️ Channel not found ({event_channel_id})"
-            else:
-                channel_status = "❌ Not configured"
-            
-            embed.add_field(
-                name="📢 Event Channel",
-                value=f"**Channel:** {channel_status}\n"
-                      f"**ID:** {event_channel_id if event_channel_id else 'None'}",
-                inline=False
-            )
-            
-            # Event Time Settings
-            event_time = guild_settings.get('event_time', '20:00:00')
-            try:
-                # Convert to 12-hour format for display
-                time_obj = datetime.strptime(event_time, '%H:%M:%S')
-                display_time = time_obj.strftime('%I:%M %p')
-            except:
-                display_time = event_time
-            
-            embed.add_field(
-                name="⏰ Event Time",
-                value=f"**Time:** {display_time} Eastern Time\n"
-                      f"**24-hour:** {event_time}",
-                inline=False
-            )
-            
-            # Posting Time Settings
-            post_time = guild_settings.get('post_time', '09:00:00')
-            try:
-                # Convert to 12-hour format for display
-                post_time_obj = datetime.strptime(post_time, '%H:%M:%S')
-                post_display_time = post_time_obj.strftime('%I:%M %p')
-            except:
-                post_display_time = post_time
-            
-            embed.add_field(
-                name="📅 Daily Posting Time",
-                value=f"**Time:** {post_display_time} Eastern Time\n"
-                      f"**24-hour:** {post_time}\n"
-                      f"**Note:** When daily RSVP posts are created",
-                inline=False
-            )
-            
-            # Reminder Settings
-            reminder_enabled = guild_settings.get('reminder_enabled', True)
-            reminder_4pm = guild_settings.get('reminder_4pm', True)
-            reminder_1_hour = guild_settings.get('reminder_1_hour', True)
-            reminder_15_minutes = guild_settings.get('reminder_15_minutes', True)
-            
-            reminder_status = "✅ Enabled" if reminder_enabled else "❌ Disabled"
-            reminder_details = []
-            if reminder_enabled:
-                reminder_details.append(f"{'✅' if reminder_4pm else '❌'} 4:00 PM Eastern")
-                reminder_details.append(f"{'✅' if reminder_1_hour else '❌'} 1 hour before event")
-                reminder_details.append(f"{'✅' if reminder_15_minutes else '❌'} 15 minutes before event")
-            
-            embed.add_field(
-                name="🔔 Reminder Settings",
-                value=f"**Status:** {reminder_status}\n"
-                      f"**Details:** {chr(10).join(reminder_details) if reminder_details else 'N/A'}",
-                inline=False
-            )
-            
-            # Admin Channel Settings
-            admin_channel_id = guild_settings.get('admin_channel_id')
-            if admin_channel_id:
-                admin_channel = inter.guild.get_channel(admin_channel_id)
-                admin_channel_status = f"<#{admin_channel_id}>" if admin_channel else f"⚠️ Channel not found ({admin_channel_id})"
-            else:
-                admin_channel_status = "❌ Not configured (uses event channel)"
-            
-            embed.add_field(
-                name="👑 Admin Channel",
-                value=f"**Channel:** {admin_channel_status}\n"
-                      f"**ID:** {admin_channel_id if admin_channel_id else 'None'}",
-                inline=False
-            )
-            
-            # Schedule Status
-            schedule = await database.get_guild_schedule(guild_id)
-            is_current_week_setup = await self.check_current_week_setup(guild_id)
-            
-            schedule_status = "✅ Configured" if schedule else "❌ Not configured"
-            current_week_status = "✅ Current week setup" if is_current_week_setup else "⚠️ Current week not setup"
-            
-            embed.add_field(
-                name="📅 Schedule Status",
-                value=f"**Weekly Schedule:** {schedule_status}\n"
-                      f"**Current Week:** {current_week_status}\n"
-                      f"**Days Configured:** {len(schedule)} of 7",
-                inline=False
-            )
-            
-            # Daily Posting Settings
-            auto_posting = "✅ Enabled (9:00 AM ET)" if guild_settings.get('auto_daily_posts', True) else "❌ Disabled"
-            
-            embed.add_field(
-                name="🔄 Automatic Features",
-                value=f"**Daily Posts:** {auto_posting}\n"
-                      f"**RSVP Tracking:** {'✅ Enabled' if guild_settings.get('rsvp_tracking', True) else '❌ Disabled'}",
-                inline=False
-            )
-            
-            # Database Information
-            embed.add_field(
-                name="💾 Database Info",
-                value=f"**Guild ID:** {guild_id}\n"
-                      f"**Settings Count:** {len(guild_settings)} items\n"
-                      f"**Last Updated:** {guild_settings.get('updated_at', 'Never')[:19] if guild_settings.get('updated_at') else 'Never'}",
-                inline=False
-            )
-            
-            # Add recommendations based on configuration
-            recommendations = []
-            if not event_channel_id:
-                recommendations.append("• Set up event channel with `/set_event_channel`")
-            if not schedule:
-                recommendations.append("• Configure weekly schedule with `/setup_weekly_schedule`")
-            if not is_current_week_setup:
-                recommendations.append("• Set up current week's schedule with `/setup_weekly_schedule`")
-            if not admin_channel_id:
-                recommendations.append("• Consider setting admin channel with `/set_admin_channel`")
-            
-            if recommendations:
-                embed.add_field(
-                    name="💡 Recommendations",
-                    value="\n".join(recommendations),
-                    inline=False
-                )
-            
-            embed.set_footer(text=f"Settings for {inter.guild.name} | Use /list_commands for help")
-            
-            await inter.edit_original_message(embed=embed)
-            
-        except Exception as e:
-            await inter.edit_original_message(
-                f"❌ **Error Getting Server Settings**\n"
-                f"An error occurred while retrieving server settings: {str(e)}"
-            )
 
     @commands.slash_command(
         name="debug_auto_posting",
@@ -3663,9 +3344,9 @@ class ScheduleCog(commands.Cog):
         
         try:
             guild_id = inter.guild.id
-            now_eastern = datetime.now(self.eastern_tz)
-            current_time = now_eastern.time().replace(second=0, microsecond=0)
-            today = now_eastern.date()
+            now_local = self.timezone_manager.now()
+            current_time = now_local.time().replace(second=0, microsecond=0)
+            today = now_local.date()
             
             # Create debug embed
             embed = disnake.Embed(
@@ -3677,7 +3358,7 @@ class ScheduleCog(commands.Cog):
             # Current time info
             embed.add_field(
                 name="⏰ Current Time Information",
-                value=f"**Eastern Time:** {now_eastern.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
+                value=f"**{self.timezone_manager.display_name} Time:** {now_local.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
                       f"**Comparison Time:** {current_time.strftime('%H:%M:%S')}\n"
                       f"**Today's Date:** {today.isoformat()}",
                 inline=False
@@ -3787,7 +3468,7 @@ class ScheduleCog(commands.Cog):
             
             # Test posting time calculation
             if guild_settings and guild_settings.get('post_time'):
-                next_post_time = now_eastern.replace(
+                next_post_time = now_local.replace(
                     hour=guild_post_time.hour,
                     minute=guild_post_time.minute,
                     second=0,
@@ -3795,10 +3476,10 @@ class ScheduleCog(commands.Cog):
                 )
                 
                 # If the time has already passed today, show tomorrow's time
-                if next_post_time <= now_eastern:
+                if next_post_time <= now_local:
                     next_post_time += timedelta(days=1)
                 
-                time_until = next_post_time - now_eastern
+                time_until = next_post_time - now_local
                 hours, remainder = divmod(int(time_until.total_seconds()), 3600)
                 minutes, _ = divmod(remainder, 60)
                 
@@ -3819,211 +3500,8 @@ class ScheduleCog(commands.Cog):
                 f"An error occurred while debugging: {str(e)}"
             )
 
-    @commands.slash_command(
-        name="test_auto_posting",
-        description="Manually trigger the automatic posting check (admin only)"
-    )
-    async def test_auto_posting(self, inter: disnake.ApplicationCommandInteraction):
-        """Manually trigger the automatic posting check"""
-        # Check permissions
-        if not check_admin_or_specific_user(inter):
-            await inter.response.send_message(
-                "❌ You don't have permission to use this command.",
-                ephemeral=True
-            )
-            return
-        
-        await inter.response.send_message(
-            "🔄 **Testing Automatic Posting**\n"
-            "Manually triggering the posting check... Check the console for `[AUTO-POST]` logs.",
-            ephemeral=True
-        )
-        
-        try:
-            # Manually call the posting check function
-            await self.check_and_post_daily_events()
-            
-        except Exception as e:
-            print(f"[TEST] Error in manual posting check: {e}")
-            traceback.print_exc()
-            
-            await inter.edit_original_message(
-                f"❌ **Test Failed**\n"
-                f"Error during manual posting check: {str(e)}\n"
-                f"Check console logs for details."
-            )
-            return
-        
-        await inter.edit_original_message(
-            "✅ **Test Complete**\n"
-            "Manual posting check finished. Check the console for `[AUTO-POST]` debug logs to see what happened."
-        )
 
-    @commands.slash_command(
-        name="restart_daily_task",
-        description="Restart the daily posting task (admin only)"
-    )
-    async def restart_daily_task(self, inter: disnake.ApplicationCommandInteraction):
-        """Restart the daily posting task"""
-        # Check permissions
-        if not check_admin_or_specific_user(inter):
-            await inter.response.send_message(
-                "❌ You don't have permission to use this command.",
-                ephemeral=True
-            )
-            return
-        
-        await inter.response.defer(ephemeral=True)
-        
-        try:
-            # Get current task status
-            task_running = self.daily_posting_task.is_running()
-            task_cancelled = self.daily_posting_task.is_being_cancelled()
-            
-            status_before = f"Running: {task_running}, Cancelled: {task_cancelled}"
-            
-            # Cancel the current task if it exists
-            if self.daily_posting_task.is_running():
-                self.daily_posting_task.cancel()
-                print(f"[RESTART] Cancelled existing daily posting task")
-            
-            # Wait a moment for cancellation to complete
-            await asyncio.sleep(1)
-            
-            # Start a new task
-            self.daily_posting_task.start()
-            print(f"[RESTART] Started new daily posting task")
-            
-            # Get new status
-            new_task_running = self.daily_posting_task.is_running()
-            new_task_cancelled = self.daily_posting_task.is_being_cancelled()
-            
-            status_after = f"Running: {new_task_running}, Cancelled: {new_task_cancelled}"
-            
-            await inter.edit_original_message(
-                f"✅ **Daily Task Restarted**\n\n"
-                f"**Before:** {status_before}\n"
-                f"**After:** {status_after}\n\n"
-                f"The task should now run every minute. Watch the console for `[TASK]` logs to confirm it's working."
-            )
-            
-        except Exception as e:
-            print(f"[RESTART] Error restarting daily task: {e}")
-            await inter.edit_original_message(
-                f"❌ **Error Restarting Task**\n"
-                f"Error: {str(e)}\n\n"
-                f"You may need to restart the bot completely."
-                         )
 
-    @commands.slash_command(
-        name="rate_limit_status",
-        description="Check potential rate limiting issues and bot API usage (admin only)"
-    )
-    async def rate_limit_status(self, inter: disnake.ApplicationCommandInteraction):
-        """Check for potential rate limiting issues"""
-        # Check permissions
-        if not check_admin_or_specific_user(inter):
-            await inter.response.send_message(
-                "❌ You don't have permission to use this command.",
-                ephemeral=True
-            )
-            return
-        
-        await inter.response.defer(ephemeral=True)
-        
-        try:
-            guild_id = inter.guild.id
-            today = datetime.now(self.eastern_tz).date()
-            
-            # Get data that could cause rate limiting
-            posts_today = await database.get_all_daily_posts_for_date(guild_id, today)
-            rsvps_today = await database.get_aggregated_rsvp_responses_for_date(guild_id, today)
-            
-            # Count guild members (potential API calls)
-            all_members = [member for member in inter.guild.members if not member.bot]
-            
-            # Create analysis embed
-            embed = disnake.Embed(
-                title="⚠️ Rate Limiting Analysis",
-                description=f"Analyzing potential Discord API rate limiting risks for **{inter.guild.name}**",
-                color=disnake.Color.orange()
-            )
-            
-            # Current usage analysis
-            embed.add_field(
-                name="📊 Current Data",
-                value=f"**Guild Members:** {len(all_members)} (excluding bots)\n"
-                      f"**Today's Posts:** {len(posts_today)}\n"
-                      f"**Today's RSVPs:** {len(rsvps_today)}\n"
-                      f"**Bot Serves:** {len(self.bot.guilds)} guilds",
-                inline=False
-            )
-            
-            # Risk assessment
-            risk_factors = []
-            risk_level = "🟢 LOW"
-            
-            if len(all_members) > 100:
-                risk_factors.append(f"• Large server ({len(all_members)} members)")
-                risk_level = "🟡 MEDIUM"
-            
-            if len(all_members) > 500:
-                risk_factors.append(f"• Very large server requires many user fetches")
-                risk_level = "🔴 HIGH"
-            
-            if len(rsvps_today) > 50:
-                risk_factors.append(f"• Many RSVPs ({len(rsvps_today)}) trigger user fetches")
-                if risk_level == "🟢 LOW":
-                    risk_level = "🟡 MEDIUM"
-            
-            # Rate limiting protections
-            protections = [
-                "✅ User fetch delays (100ms per user)",
-                "✅ Cleanup delays (500ms per message)", 
-                "✅ Duplicate post prevention",
-                "✅ Task error handling",
-                "✅ Debug logging for monitoring"
-            ]
-            
-            embed.add_field(
-                name="🛡️ Active Protections",
-                value="\n".join(protections),
-                inline=False
-            )
-            
-            # Risk assessment  
-            embed.add_field(
-                name="⚠️ Risk Level",
-                value=f"**Level:** {risk_level}\n" + 
-                      ("\n".join(risk_factors) if risk_factors else "• No significant risk factors"),
-                inline=False
-            )
-            
-            # Recommendations
-            recommendations = [
-                "• Monitor console for `[RATE-LIMIT]` logs",
-                "• Avoid simultaneous `/view_rsvps` + cleanup commands",
-                "• Use `/debug_auto_posting` for troubleshooting"
-            ]
-            
-            if len(all_members) > 500:
-                recommendations.insert(0, "• Limit `/view_rsvps` usage during peak times")
-            
-            embed.add_field(
-                name="💡 Best Practices",
-                value="\n".join(recommendations),
-                inline=False
-            )
-            
-            embed.set_footer(text="459 errors = Cloudflare rate limiting | Watch for [RATE-LIMIT] logs")
-            
-            await inter.edit_original_message(embed=embed)
-            
-        except Exception as e:
-            await inter.edit_original_message(
-                f"❌ **Error in Rate Limit Analysis**\n"
-                f"Error: {str(e)}"
-            )
 
     @commands.slash_command(
         name="debug_reminders",
@@ -4043,8 +3521,8 @@ class ScheduleCog(commands.Cog):
         
         try:
             guild_id = inter.guild.id
-            now_eastern = datetime.now(self.eastern_tz)
-            today = now_eastern.date()
+            now_local = self.timezone_manager.now()
+            today = now_local.date()
             
             # Create debug embed
             embed = disnake.Embed(
@@ -4056,10 +3534,10 @@ class ScheduleCog(commands.Cog):
             # Current time info
             embed.add_field(
                 name="⏰ Current Time Information",
-                value=f"**Eastern Time:** {now_eastern.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
+                value=f"**{self.timezone_manager.display_name} Time:** {now_local.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
                       f"**Today's Date:** {today.isoformat()}\n"
-                      f"**Current Hour:** {now_eastern.hour}\n"
-                      f"**Current Minute:** {now_eastern.minute}",
+                      f"**Current Hour:** {now_local.hour}\n"
+                      f"**Current Minute:** {now_local.minute}",
                 inline=False
             )
             
@@ -4111,19 +3589,19 @@ class ScheduleCog(commands.Cog):
                 
                 # Calculate reminder times with windows
                 if event_time:
-                    event_today = now_eastern.replace(hour=event_time.hour, minute=event_time.minute, second=0, microsecond=0)
+                    event_today = now_local.replace(hour=event_time.hour, minute=event_time.minute, second=0, microsecond=0)
                     one_hour_before = event_today - timedelta(hours=1)
                     fifteen_min_before = event_today - timedelta(minutes=15)
                     
                     # Check if we're in the reminder windows
-                    in_4pm_window = now_eastern.hour == 16 and now_eastern.minute < 5
-                    in_1h_window = one_hour_before <= now_eastern <= (one_hour_before + timedelta(minutes=4))
-                    in_15m_window = fifteen_min_before <= now_eastern <= (fifteen_min_before + timedelta(minutes=4))
+                    in_4pm_window = now_local.hour == 16 and now_local.minute < 5
+                    in_1h_window = one_hour_before <= now_local <= (one_hour_before + timedelta(minutes=4))
+                    in_15m_window = fifteen_min_before <= now_local <= (fifteen_min_before + timedelta(minutes=4))
                     
                     # Status for each reminder
-                    four_pm_status = "🟡 IN WINDOW" if in_4pm_window else ("🟢 PASSED" if now_eastern.hour > 16 or (now_eastern.hour == 16 and now_eastern.minute >= 5) else "⏳ UPCOMING")
-                    one_h_status = "🟡 IN WINDOW" if in_1h_window else ("🟢 PASSED" if now_eastern > (one_hour_before + timedelta(minutes=4)) else "⏳ UPCOMING")
-                    fifteen_m_status = "🟡 IN WINDOW" if in_15m_window else ("🟢 PASSED" if now_eastern > (fifteen_min_before + timedelta(minutes=4)) else "⏳ UPCOMING")
+                    four_pm_status = "🟡 IN WINDOW" if in_4pm_window else ("🟢 PASSED" if now_local.hour > 16 or (now_local.hour == 16 and now_local.minute >= 5) else "⏳ UPCOMING")
+                    one_h_status = "🟡 IN WINDOW" if in_1h_window else ("🟢 PASSED" if now_local > (one_hour_before + timedelta(minutes=4)) else "⏳ UPCOMING")
+                    fifteen_m_status = "🟡 IN WINDOW" if in_15m_window else ("🟢 PASSED" if now_local > (fifteen_min_before + timedelta(minutes=4)) else "⏳ UPCOMING")
                     
                     embed.add_field(
                         name="⏰ Reminder Times & Windows (Today)",
@@ -4217,15 +3695,15 @@ class ScheduleCog(commands.Cog):
                 # If everything looks good, show next steps
                 next_reminder = "No more reminders today"
                 if event_time:
-                    event_today = now_eastern.replace(hour=event_time.hour, minute=event_time.minute, second=0, microsecond=0)
+                    event_today = now_local.replace(hour=event_time.hour, minute=event_time.minute, second=0, microsecond=0)
                     
                     # Check upcoming reminder windows
-                    if now_eastern.hour < 16:
+                    if now_local.hour < 16:
                         next_reminder = "4:00-4:04 PM today"
-                    elif now_eastern < (event_today - timedelta(hours=1)):
+                    elif now_local < (event_today - timedelta(hours=1)):
                         one_hour_before = event_today - timedelta(hours=1)
                         next_reminder = f"{one_hour_before.strftime('%I:%M')}-{(one_hour_before + timedelta(minutes=4)).strftime('%I:%M %p')} today (1 hour before)"
-                    elif now_eastern < (event_today - timedelta(minutes=15)):
+                    elif now_local < (event_today - timedelta(minutes=15)):
                         fifteen_min_before = event_today - timedelta(minutes=15)
                         next_reminder = f"{fifteen_min_before.strftime('%I:%M')}-{(fifteen_min_before + timedelta(minutes=4)).strftime('%I:%M %p')} today (15 minutes before)"
                 
@@ -4247,125 +3725,7 @@ class ScheduleCog(commands.Cog):
                 f"An error occurred while debugging reminders: {str(e)}"
             )
 
-    @commands.slash_command(
-        name="test_reminder",
-        description="Manually trigger reminder check for testing (admin only)"
-    )
-    async def test_reminder(self, inter: disnake.ApplicationCommandInteraction):
-        """Manually trigger the reminder check for testing"""
-        # Check permissions
-        if not check_admin_or_specific_user(inter):
-            await inter.response.send_message(
-                "❌ You don't have permission to use this command.",
-                ephemeral=True
-            )
-            return
-        
-        await inter.response.send_message(
-            "🔄 **Testing Reminder System**\n"
-            "Manually triggering reminder check... Watch the console for `[REMINDER]` logs.",
-            ephemeral=True
-        )
-        
-        try:
-            # Manually call the reminder check
-            await self.check_and_send_reminders()
-            
-        except Exception as e:
-            print(f"[TEST] Error in manual reminder check: {e}")
-            traceback.print_exc()
-            
-            await inter.edit_original_message(
-                f"❌ **Test Failed**\n"
-                f"Error during manual reminder check: {str(e)}\n"
-                f"Check console logs for details."
-            )
-            return
-        
-        await inter.edit_original_message(
-            "✅ **Test Complete**\n"
-            "Manual reminder check finished. Check the console for `[REMINDER]` debug logs to see what happened."
-        )
 
-    @commands.slash_command(
-        name="reset_reminder_tracking",
-        description="Reset reminder tracking to allow testing reminders again today (admin only)"
-    )
-    async def reset_reminder_tracking(self, inter: disnake.ApplicationCommandInteraction):
-        """Reset reminder tracking for testing purposes"""
-        # Check permissions
-        if not check_admin_or_specific_user(inter):
-            await inter.response.send_message(
-                "❌ You don't have permission to use this command.",
-                ephemeral=True
-            )
-            return
-        
-        await inter.response.defer(ephemeral=True)
-        
-        try:
-            guild_id = inter.guild.id
-            today = datetime.now(self.eastern_tz).date()
-            
-            # Get today's post
-            post_data = await database.get_daily_post(guild_id, today)
-            
-            if not post_data:
-                await inter.edit_original_message(
-                    "❌ **No Event Post Found**\n"
-                    "No daily event post found for today. Create one with `/force_post_rsvp` first."
-                )
-                return
-            
-            # Clear in-memory tracking for this guild
-            keys_to_remove = []
-            for key in self.last_reminder_times.keys():
-                if key[0] == guild_id:  # key is (guild_id, reminder_type)
-                    keys_to_remove.append(key)
-            
-            for key in keys_to_remove:
-                del self.last_reminder_times[key]
-            
-            # Clear database tracking for today's post
-            await database.clear_reminder_tracking(post_data['id'])
-            
-            embed = disnake.Embed(
-                title="🔄 Reminder Tracking Reset",
-                description="Reminder tracking has been cleared for testing purposes.",
-                color=disnake.Color.green()
-            )
-            
-            embed.add_field(
-                name="✅ What Was Reset",
-                value=f"• In-memory duplicate prevention\n"
-                      f"• Database reminder sent tracking\n"
-                      f"• Post ID: {post_data['id']}\n"
-                      f"• Event: {post_data['event_data'].get('event_name', 'Unknown')}",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="🧪 Testing Reminders",
-                value="You can now test reminders by:\n"
-                      "• Using `/test_reminder` to manually trigger checks\n"
-                      "• Waiting for the next 5-minute reminder task cycle\n"
-                      "• Checking console for `[REMINDER]` logs",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="⚠️ Important Note",
-                value="This is for testing only. In normal operation, each reminder should only be sent once per day.",
-                inline=False
-            )
-            
-            await inter.edit_original_message(embed=embed)
-            
-        except Exception as e:
-            await inter.edit_original_message(
-                f"❌ **Error Resetting Tracking**\n"
-                f"An error occurred: {str(e)}"
-            )
 
 def setup(bot):
     bot.add_cog(ScheduleCog(bot)) 
