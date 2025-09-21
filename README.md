@@ -108,13 +108,13 @@ URL: https://discord.com/oauth2/authorize?client_id=1388283299562262559&permissi
    ```
    /set_event_time hour:20 minute:0
    ```
-   This example sets events to start at 8:00 PM Eastern Time.
+   This example sets events to start at 8:00 PM in the server timezone (Eastern Time).
 
 4. **Set when daily posts appear** (optional)
    ```
    /set_posting_time hour:9 minute:0
    ```
-   This sets when the daily RSVP posts are created (default is 9:00 AM Eastern).
+   This sets when the daily RSVP posts are created (default is 9:00 AM Eastern Time).
 
 5. **Turn on reminders**
    ```
@@ -308,6 +308,17 @@ GUILD_CLEANUP_DAYS_THRESHOLD=21  # Days to preserve recently active guilds
 
 ## ⚙️ Advanced Configuration
 
+### Timezone Configuration
+
+The bot's timezone is determined by the server location where it's hosted. Currently, the bot is configured for **US East Coast (Eastern Time)** and automatically handles daylight saving time transitions.
+
+**Important Notes:**
+- **Event Times**: All event times (`/set_event_time`) and posting times (`/set_posting_time`) must be entered in **Eastern Time** regardless of server location
+- **Consistency**: This ensures all users see event times in the same timezone
+- **Server Location**: The bot's internal operations use Eastern Time based on server location
+- **DST Handling**: Daylight saving time transitions are handled automatically
+- **User Experience**: All times are displayed consistently in Eastern Time
+
 ### Environment Variables
 Add these to your `.env` file for optimal performance and security:
 
@@ -360,9 +371,9 @@ The bot includes a special access system for a specific user ID (300157754012860
 
 The bot works automatically once you set it up:
 
-- **Daily Posts**: Events appear automatically at your configured time (default: 9:00 AM Eastern)
+- **Daily Posts**: Events appear automatically at your configured time (default: 9:00 AM Eastern Time)
 - **Smart Reminders**: Sends reminders based on your settings:
-  - 4:00 PM Eastern (daily reminder)
+  - 4:00 PM Eastern Time (daily reminder)
   - 1 hour before the event
   - 15 minutes before the event
 
@@ -602,7 +613,7 @@ If something isn't working:
 - **New Command**: `/set_admin_channel` to specify where admin notifications are sent
 
 #### How It Works:
-1. **Daily Check**: At 9 AM Eastern, bot validates current week's schedule
+1. **Daily Check**: At 9 AM Eastern Time, bot validates current week's schedule
 2. **Smart Response**: Posts normally if schedule is current, sends admin notification if outdated
 3. **Admin Awareness**: Admins get notified when they need to set up the weekly schedule
 4. **Flexible Configuration**: Choose where admin notifications are sent
