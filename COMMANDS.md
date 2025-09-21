@@ -2,6 +2,8 @@
 
 This bot helps manage weekly event schedules and RSVP tracking for Discord servers.
 
+> **📢 Recent Update**: Command interface has been streamlined! We've removed technical/debugging commands that were cluttering the interface, keeping only the essential commands you need for daily RSVP management.
+
 ## 🚀 Getting Started
 
 ### Initial Setup Commands
@@ -142,20 +144,6 @@ Diagnose why automatic daily posts aren't working. Shows timing, settings, and s
 - **Usage**: No parameters needed
 - **Shows**: Current time, posting configuration, schedule status, task status
 
-#### `/test_auto_posting`
-Manually trigger the automatic posting check to see what happens right now (with debug logs).
-- **Usage**: No parameters needed
-- **Note**: Check console for detailed `[AUTO-POST]` logs
-
-#### `/restart_daily_task`
-Restart the automatic posting task if it's not working properly.
-- **Usage**: No parameters needed
-- **When to use**: If automatic posting completely stops working
-
-#### `/rate_limit_status`
-Check if your server might be causing Discord rate limiting issues. Shows risk level and recommendations.
-- **Usage**: No parameters needed
-- **Shows**: Member count, risk assessment, active protections, recommendations
 
 #### `/debug_view_rsvps`
 Debug why view_rsvps isn't finding posts when they exist.
@@ -168,16 +156,6 @@ Debug why reminders are not being sent out. Shows complete reminder system diagn
 - **Shows**: Task status, reminder settings, timing, database queries, duplicate prevention
 - **When to use**: When reminders stop working or aren't being sent
 
-#### `/test_reminder`
-Manually trigger the reminder check system to test if it's working.
-- **Usage**: No parameters needed
-- **Note**: Check console for detailed `[REMINDER]` logs to see what happens
-
-#### `/reset_reminder_tracking`
-Reset reminder tracking to allow testing reminders again today (for debugging).
-- **Usage**: No parameters needed
-- **When to use**: After fixing reminder issues, to test if reminders work without waiting for tomorrow
-- **Warning**: Only for testing - normally each reminder should only be sent once per day
 
 ### 🔧 System Information
 
@@ -186,66 +164,12 @@ Is the bot working properly? Check here if things seem slow.
 - **Usage**: No parameters needed  
 - **Shows**: Basic bot health information
 
-#### `/monitor_status`
-Detailed bot health info (for tech-savvy users).
-- **Usage**: No parameters needed
-- **Shows**: Uptime, memory usage, latency, heartbeat count, warnings
-
-#### `/test_connection`
-Test the bot's connection to Discord and database (comprehensive test).
-- **Usage**: No parameters needed
-- **Shows**: Discord connection, database connection, and latency status
-
-#### `/test_database`
-Test database connection and show configuration details.
-- **Usage**: No parameters needed
-- **Shows**: Database connection status and configuration info
-
-#### `/server_settings`
-Show all bot settings configured for this server.
-- **Usage**: No parameters needed
-- **Shows**: Complete configuration overview
-
-### 🚀 Performance Monitoring (Admin Only)
-
-#### `/system_health`
-Get comprehensive system health and performance metrics.
-- **Usage**: No parameters needed
-- **Shows**: Cache performance, database stats, task performance, security status, error summary, rate limiting
-- **Access**: Admin permissions required
-
-#### `/performance_metrics`
-Get detailed performance analysis and optimization insights.
-- **Usage**: No parameters needed
-- **Shows**: Cache utilization, database query times, task success rates, error analysis with recommendations
-- **Access**: Admin permissions required
-
-#### `/security_status`
-Get security monitoring and threat detection status.
-- **Usage**: No parameters needed
-- **Shows**: Security events, threat counts, active rules, recent security events
-- **Access**: Admin permissions required
-
 #### `/clear_cache`
 Clear all cache entries to force fresh data.
 - **Usage**: No parameters needed
 - **Shows**: Cache statistics after clearing
 - **Access**: Admin permissions required
 - **Use Case**: When RSVP data appears stale or outdated
-
-#### `/validate_rsvp_data`
-Validate RSVP data integrity and check for missing RSVPs.
-- **Usage**: No parameters needed
-- **Shows**: Data integrity check results, missing RSVPs, recommendations
-- **Access**: Admin permissions required
-- **Use Case**: After timezone changes or when RSVP data seems incomplete
-
-#### `/migrate_rsvp_data`
-Migrate RSVP data for timezone changes.
-- **Usage**: No parameters needed
-- **Shows**: Migration results, RSVPs processed, data integrity status
-- **Access**: Admin permissions required
-- **Use Case**: When changing bot timezone to ensure all RSVP data is preserved
 
 ---
 
@@ -269,7 +193,7 @@ The bot automatically:
 1. Use `/list_help` then `/debug_auto_posting` to diagnose
 2. Check if current week's schedule is set up
 3. Verify event channel is configured
-4. Try `/list_help` then `/restart_daily_task` if task is stuck
+4. Restart the bot if the task appears stuck
 
 ### Commands Not Showing
 1. Use `/list_help` then `/force_sync` to re-register commands
@@ -277,9 +201,9 @@ The bot automatically:
 3. Restart bot if necessary
 
 ### Rate Limiting (459 Errors)
-1. Use `/list_help` then `/rate_limit_status` to check risk level
-2. Avoid running `/view_rsvps` during peak times if server is large (500+ members)
-3. Bot now includes automatic rate limiting protection
+1. Avoid running `/view_rsvps` during peak times if server is large (500+ members)
+2. Bot includes automatic rate limiting protection
+3. Restart bot if rate limiting persists
 
 ### RSVP Posts Missing
 1. Use `/list_help` then `/force_post_rsvp` to post immediately

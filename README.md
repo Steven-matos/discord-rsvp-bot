@@ -195,35 +195,18 @@ Admins get powerful reporting tools to track engagement:
 | `/weekly_rsvp_report` | Get comprehensive weekly RSVP report with attendance analysis | Server Admins + Specific User |
 | `/list_commands` | See main bot commands for everyday use | Server Admins + Specific User |
 | `/list_help` | See troubleshooting, maintenance, and diagnostic commands | Server Admins + Specific User |
-| `/cleanup_guilds` | Manually trigger guild cleanup to remove orphaned data | Server Admins + Specific User |
+| `/clear_cache` | Clear all cache entries to force fresh data | Server Admins + Specific User |
 
 ## 🩺 Monitoring & Diagnostics
 
 | Command | What It Does |
 |---------|--------------|
 | `/bot_status` | Check the bot's current status, uptime, and connection health |
-| `/monitor_status` | Get detailed monitoring information including memory, CPU, and performance metrics |
-| `/test_connection` | Test the bot's connection to Discord and database |
 
 **When to use these commands:**
 - Bot seems slow or unresponsive
 - Commands are timing out frequently
 - Checking if the bot is healthy after restart
-- Diagnosing connection issues
-
-## 🚀 Performance Monitoring (Admin Only)
-
-| Command | What It Does |
-|---------|--------------|
-| `/system_health` | Get comprehensive system health and performance metrics dashboard |
-| `/performance_metrics` | Get detailed performance analysis with optimization insights |
-| `/security_status` | Get security monitoring and threat detection status |
-
-**Features:**
-- Real-time system status and performance metrics
-- Cache performance analysis and database optimization insights
-- Security event summary and threat detection statistics
-- Error rate analysis with automated recovery recommendations
 
 ## ⚡ Performance Optimizations
 
@@ -411,7 +394,7 @@ The bot works automatically once you set it up:
 - Verify the bot can send messages in your event channel
 
 ### RSVP Posts Not Appearing?
-- Use `/list_help` then `/force_post_rsvp` to manually post today's RSVP (shows progress updates)
+- Use `/list_help` then `/force_post_rsvp` to manually post today's RSVP
 - Check bot permissions in the event channel (Send Messages, Embed Links, Manage Messages)
 - Verify the event channel is configured with `/set_event_channel`
 - Ensure the weekly schedule is set up with `/setup_weekly_schedule`
@@ -437,67 +420,49 @@ The bot works automatically once you set it up:
 #### High Database Query Times
 **Symptoms:** Database queries taking >500ms
 **Solutions:**
-1. Check cache hit rate with `/performance_metrics` - should be >80%
-2. Review database connection pool status
-3. Analyze slow query logs
-4. Consider increasing cache size in configuration
+1. Use `/clear_cache` to refresh cached data
+2. Check bot status with `/bot_status`
+3. Restart the bot if issues persist
+4. Verify database connectivity
 
 #### High Error Rates
 **Symptoms:** Error rate >5%
 **Solutions:**
-1. Check error categories in `/system_health`
-2. Review recent errors in error monitor
+1. Check bot status with `/bot_status`
+2. Review console logs for errors
 3. Check for rate limiting issues
 4. Verify database connectivity
 
 #### Cache Performance Issues
-**Symptoms:** Low cache hit rate <50%
+**Symptoms:** Stale or outdated data
 **Solutions:**
-1. Increase cache size in configuration
-2. Review cache TTL settings
-3. Check for cache invalidation patterns
-4. Monitor memory usage
-
-### Security Issues
-
-#### Security Alerts
-**Symptoms:** High number of security events
-**Solutions:**
-1. Review threat types in `/security_status`
-2. Check for blocked users/guilds
-3. Update security rules if needed
-4. Monitor for attack patterns
-
-#### Rate Limiting Issues
-**Symptoms:** Commands frequently rate limited
-**Solutions:**
-1. Check rate limit status with `/rate_limit_status`
-2. Review user-specific limits
-3. Adjust rate limiting configuration
-4. Monitor for abuse patterns
+1. Use `/clear_cache` to force fresh data
+2. Restart the bot to reset all caches
+3. Check database connectivity
+4. Monitor console logs for cache errors
 
 ## 📊 Monitoring & Maintenance
 
 ### Daily Monitoring
-- Monitor system health dashboard with `/system_health`
-- Check error logs for critical issues
-- Review security events with `/security_status`
+- Check bot status with `/bot_status`
+- Monitor console logs for errors
+- Verify automatic posting is working
 
 ### Weekly Maintenance
-- Analyze performance trends with `/performance_metrics`
-- Review and update security rules
-- Check backup integrity
+- Review RSVP reports with `/weekly_rsvp_report`
+- Check for any stuck processes
+- Verify reminder system is working
 
 ### Monthly Tasks
-- Performance optimization review
-- Security audit
-- System capacity planning
+- Review command usage patterns
+- Check for any persistent issues
+- Update bot if needed
 
 ### Key Metrics to Monitor
-- **Cache hit rate** (target: >80%)
-- **Database query time** (target: <100ms average)
-- **Task success rate** (target: >95%)
-- **Error rate** (target: <1%)
+- **Bot uptime** (should be stable)
+- **Command response time** (should be fast)
+- **Error rate** (should be minimal)
+- **RSVP participation** (track engagement)
 
 ## 🎯 Tips for Success
 
@@ -505,7 +470,7 @@ The bot works automatically once you set it up:
 2. **Use Clear Names**: Make event names easy to understand
 3. **Test Your Setup**: Try the RSVP buttons yourself first
 4. **Check Permissions**: Make sure the bot has all the permissions it needs (including Manage Messages)
-5. **Watch Progress**: Commands now show real-time status updates (🔄 messages)
+5. **Watch Progress**: Commands show real-time status updates
 6. **Keep It Updated**: The bot will automatically handle time changes and daylight saving
 
 ## 🆘 Need Help?
@@ -518,7 +483,35 @@ If something isn't working:
 
 ## 🎉 What's New
 
-### Latest Update: Intelligent Guild Cleanup System ✅
+### Latest Update: Command Cleanup & Streamlined Interface ✅
+**Removed unnecessary commands to create a cleaner, more user-friendly experience.**
+
+#### What Changed:
+- **Simplified Command Set**: Removed 14 technical/debugging commands that were cluttering the interface
+- **Cleaner Help Menus**: Streamlined `/list_commands` and `/list_help` for easier navigation
+- **Faster Command Loading**: Fewer commands to register with Discord means faster startup
+- **Better User Experience**: New users see only essential commands, reducing confusion
+- **Updated Documentation**: Both README.md and COMMANDS.md reflect the new streamlined command set
+
+#### Commands Removed:
+- Performance monitoring commands (`/system_health`, `/performance_metrics`, `/security_status`)
+- Debugging commands (`/test_auto_posting`, `/test_reminder`, `/reset_reminder_tracking`)
+- Technical commands (`/monitor_status`, `/test_connection`, `/test_database`)
+- Redundant commands (`/server_settings`, `/rate_limit_status`, `/restart_daily_task`)
+
+#### Commands Kept:
+- All essential RSVP and scheduling functionality
+- Core admin commands for setup and management
+- Essential debugging commands (`/debug_auto_posting`, `/debug_view_rsvps`, `/debug_reminders`)
+- Status and help commands (`/bot_status`, `/clear_cache`, `/list_commands`, `/list_help`)
+
+#### Benefits:
+- **Cleaner Interface**: Users see only commands they actually need
+- **Reduced Confusion**: No more overwhelming technical commands
+- **Faster Performance**: Fewer commands to process and register
+- **Better Focus**: Clear distinction between essential and advanced features
+
+### Previous Update: Intelligent Guild Cleanup System ✅
 **Automatic database maintenance with smart activity-based preservation.**
 
 #### What Changed:
