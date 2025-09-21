@@ -4,6 +4,10 @@ This bot helps manage weekly event schedules and RSVP tracking for Discord serve
 
 > **📢 Recent Update**: Command interface has been streamlined! We've removed technical/debugging commands that were cluttering the interface, keeping only the essential commands you need for daily RSVP management.
 
+## ⏰ Important Time Zone Note
+
+**All time commands use Eastern Time regardless of server location.** When setting event times (`/set_event_time`) or posting times (`/set_posting_time`), always enter times in Eastern Time to ensure consistency for all users.
+
 ## 🚀 Getting Started
 
 ### Initial Setup Commands
@@ -20,17 +24,19 @@ Pick which channel the bot should post events in. This is where your team will s
 
 #### `/set_event_time <hour> <minute>`
 What time do your events usually start? This helps the bot send reminders at the right times.
+- **Important**: Enter time in **Eastern Time** regardless of server location
 - **Parameters**: 
   - `hour` - Hour in 24-hour format (0-23)
   - `minute` - Minute (0-59)
-- **Example**: `/set_event_time 20 00` (8:00 PM Eastern)
+- **Example**: `/set_event_time 20 00` (8:00 PM Eastern Time)
 
 #### `/set_posting_time <hour> <minute>`
-What time should the bot create the daily RSVP posts? (Default: 9:00 AM Eastern). This is when the post appears each day.
+What time should the bot create the daily RSVP posts? (Default: 9:00 AM Eastern Time). This is when the post appears each day.
+- **Important**: Enter time in **Eastern Time** regardless of server location
 - **Parameters**: 
   - `hour` - Hour in 24-hour format (0-23) 
   - `minute` - Minute (0-59)
-- **Example**: `/set_posting_time 09 00` (9:00 AM Eastern)
+- **Example**: `/set_posting_time 09 00` (9:00 AM Eastern Time)
 
 ---
 
@@ -50,7 +56,7 @@ Change or add events for any day. Maybe Monday changed from 'Raids' to 'PvP Nigh
 Want reminders? The bot can ping everyone about tonight's event, or remind them an hour before it starts.
 - **Parameters** (all optional):
   - `enabled` - Enable/disable all reminders (default: true)
-  - `four_pm` - Send reminder at 4:00 PM Eastern (default: true)
+  - `four_pm` - Send reminder at 4:00 PM Eastern Time (default: true)
   - `one_hour` - Send reminder 1 hour before event (default: true)
   - `fifteen_minutes` - Send reminder 15 minutes before event (default: true)
 
@@ -177,9 +183,9 @@ Clear all cache entries to force fresh data.
 
 The bot automatically:
 
-- **Daily Posting**: Posts RSVP messages at your configured time (default 9:00 AM Eastern)
+- **Daily Posting**: Posts RSVP messages at your configured time (default 9:00 AM Eastern Time)
 - **Reminders**: Sends event reminders based on your settings:
-  - 4:00 PM Eastern (if enabled)
+  - 4:00 PM Eastern Time (if enabled)
   - 1 hour before event (if enabled) 
   - 15 minutes before event (if enabled)
 - **Cleanup**: Removes old event posts daily to keep channels tidy
