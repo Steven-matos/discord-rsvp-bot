@@ -1,4 +1,5 @@
 import os
+import sys
 import disnake
 from disnake.ext import commands
 import database
@@ -24,11 +25,34 @@ from core.memory_optimizer import memory_optimizer
 from core.resource_monitor import resource_monitor
 
 # Set up logging for better monitoring
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configure logging to stdout with proper level handling for Railway
+# Remove default handlers to avoid duplicates
+root_logger = logging.getLogger()
+root_logger.handlers.clear()
+
+# Create a handler that writes to stdout (Railway expects stdout for non-errors)
+# This ensures INFO and WARNING logs are not treated as errors
+stdout_handler = logging.StreamHandler(sys.stdout)
+stdout_handler.setLevel(logging.DEBUG)  # Capture all levels
+
+# Format with level first for better Railway parsing
+# Railway should parse the levelname from this format
+formatter = logging.Formatter('[%(levelname)s] %(asctime)s - %(name)s - %(message)s')
+stdout_handler.setFormatter(formatter)
+
+# Configure root logger
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(stdout_handler)
+
 logger = logging.getLogger(__name__)
+
+# Configure disnake logging
+disnake_logger = logging.getLogger('disnake')
+disnake_logger.setLevel(logging.INFO)
+
+# Configure httpx logging (used by supabase client) - reduce verbosity
+httpx_logger = logging.getLogger('httpx')
+httpx_logger.setLevel(logging.WARNING)  # Only show warnings/errors from httpx
 
 # Set up bot intents
 intents = disnake.Intents.default()
