@@ -3,6 +3,7 @@ from disnake.ext import commands, tasks
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
+from typing import List
 
 logger = logging.getLogger(__name__)
 

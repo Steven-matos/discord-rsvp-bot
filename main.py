@@ -341,11 +341,12 @@ async def load_cogs():
     except Exception as e:
         logger.error(f"Failed to load cogs.monitor: {e}")
     
-    try:
-        bot.load_extension('cogs.performance')
-        logger.info("Successfully loaded cogs.performance")
-    except Exception as e:
-        logger.error(f"Failed to load cogs.performance: {e}")
+    # cogs.performance extension removed - functionality integrated into other cogs
+    # try:
+    #     bot.load_extension('cogs.performance')
+    #     logger.info("Successfully loaded cogs.performance")
+    # except Exception as e:
+    #     logger.error(f"Failed to load cogs.performance: {e}")
 
 # Add heartbeat to keep bot alive
 async def heartbeat():
